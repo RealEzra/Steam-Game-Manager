@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "steam-downgrader-gui",
-  "version": "0.1.0",
-  "identifier": "com.ezradulaney.steam-downgrader-gui",
+  "productName": "steam-game-manager",
+  "version": "0.9.0",
+  "identifier": "com.ezradulaney.steam-game-manager",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -12,9 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "steam-downgrader-gui",
-        "width": 800,
-        "height": 600
+        "title": "Steam Game Manager",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": false
       }
     ],
     "security": {
@@ -24,6 +27,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -31,5 +35,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzNkFGRUIzNDFBREQ2RTIKUldUaTFxMUJzLzVxZ3hjTHpzTEZmc0F1MTZQM0pkMVg0M2R0V0l2NHk4VkpFalpCRXJMVkRDeDcK",
+      "endpoints": [
+        "https://github.com/RealEzra/steam-game-manager/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

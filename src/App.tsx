@@ -1,63 +1,579 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import { Button, Container, HStack, Heading, Input, Text, VStack } from "@chakra-ui/react";
-import { ColorModeButton } from "@/components/ui/color-mode";
-import "./App.css";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Box,
+  Button,
+  Flex,
+  Grid,
+  HStack,
+  Heading,
+  Spinner,
+  Text,
+  VStack,
+} from '@chakra-ui/react';
+import { invoke } from '@tauri-apps/api/core';
+import { TitleBar } from '@/components/TitleBar';
+import { Header } from '@/components/Header';
+import { FilterBar, SortOption } from '@/components/FilterBar';
+import { GameCard } from '@/components/GameCard';
+import { GameRow } from '@/components/GameRow';
+import { GameDetailModal } from '@/components/GameDetailModal';
+import { SettingsModal } from '@/components/SettingsModal';
+import { ContextMenu, ContextMenuState } from '@/components/ContextMenu';
+import { FolderBrowserModal } from '@/components/FolderBrowserModal';
+import { AddGameModal } from '@/components/AddGameModal';
+import { toaster } from '@/components/ui/toaster';
+import { ScanResult, SteamGame, SteamLibrary } from '@/types';
+import { isGameVisible } from '@/utils/filterGames';
+import { checkUpdate } from '@/utils/updater';
+import { LuFolderPlus, LuFolderSync, LuGamepad2, LuHardDrive } from 'react-icons/lu';
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+export function App() {
+  const [games, setGames] = useState<SteamGame[]>([]);
+  const [libraries, setLibraries] = useState<SteamLibrary[]>([]);
+  const [steamPath, setSteamPath] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  // Hidden game IDs persisted in localStorage
+  const [hiddenGameIds, setHiddenGameIds] = useState<Set<number>>(() => {
+    try {
+      const saved = localStorage.getItem('steam_hidden_game_ids');
+      return saved ? new Set<number>(JSON.parse(saved)) : new Set<number>();
+    } catch {
+      return new Set<number>();
+    }
+  });
+
+  const [showHidden, setShowHidden] = useState(false);
+  const [showUninstalled, setShowUninstalled] = useState(false);
+
+  // Custom user-added games persisted in localStorage
+  const [customAddedGames, setCustomAddedGames] = useState<SteamGame[]>(() => {
+    try {
+      const saved = localStorage.getItem('steam_custom_added_games');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Custom paths persisted in localStorage
+  const [customPaths, setCustomPaths] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('steam_custom_paths');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Filter & View State
+  const [search, setSearch] = useState('');
+  const [selectedLibrary, setSelectedLibrary] = useState('all');
+  const [sortBy, setSortBy] = useState<SortOption>('name_asc');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  // Modal State
+  const [selectedGame, setSelectedGame] = useState<SteamGame | null>(null);
+  const [detailModalTab, setDetailModalTab] = useState<'downgrade' | 'vault' | 'backups' | 'info'>('downgrade');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isFolderBrowserOpen, setIsFolderBrowserOpen] = useState(false);
+  const [isAddGameOpen, setIsAddGameOpen] = useState(false);
+
+  const handleAddCustomGame = (newGame: SteamGame) => {
+    setCustomAddedGames((prev) => {
+      const updated = [newGame, ...prev.filter((g) => g.appid !== newGame.appid)];
+      localStorage.setItem('steam_custom_added_games', JSON.stringify(updated));
+      return updated;
+    });
+    setGames((prev) => {
+      return [newGame, ...prev.filter((g) => g.appid !== newGame.appid)];
+    });
+    handleOpenGame(newGame, 'downgrade');
+  };
+
+  const handleOpenGame = (game: SteamGame, tab: 'downgrade' | 'vault' | 'backups' | 'info' = 'downgrade') => {
+    setSelectedGame(game);
+    setDetailModalTab(tab);
+  };
+
+  // Custom Context Menu State
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>({
+    isOpen: false,
+    x: 0,
+    y: 0,
+    game: null,
+  });
+
+  const saveCustomPaths = (paths: string[]) => {
+    setCustomPaths(paths);
+    localStorage.setItem('steam_custom_paths', JSON.stringify(paths));
+  };
+
+  const handleAddCustomPath = (path: string) => {
+    const updated = [...customPaths, path];
+    saveCustomPaths(updated);
+  };
+
+  const handleRemoveCustomPath = (path: string) => {
+    const updated = customPaths.filter((p) => p !== path);
+    saveCustomPaths(updated);
+  };
+
+  const handleToggleHide = (appid: number, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    setHiddenGameIds((prev) => {
+      const updated = new Set(prev);
+      if (updated.has(appid)) {
+        updated.delete(appid);
+        toaster.create({
+          title: 'Game Unhidden',
+          description: `Game #${appid} is now visible.`,
+          type: 'info',
+        });
+      } else {
+        updated.add(appid);
+        toaster.create({
+          title: 'Game Hidden',
+          description: `Game #${appid} has been hidden. Toggle 'Hidden' in the filter bar to view.`,
+          type: 'info',
+        });
+      }
+      localStorage.setItem('steam_hidden_game_ids', JSON.stringify(Array.from(updated)));
+      return updated;
+    });
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, game: SteamGame) => {
+    e.preventDefault();
+    setContextMenu({
+      isOpen: true,
+      x: e.clientX,
+      y: e.clientY,
+      game,
+    });
+  };
+
+  const scanLibraries = async (overridePaths?: string[]) => {
+    setIsScanning(true);
+    const pathsToScan = overridePaths || customPaths;
+    try {
+      const result = await invoke<ScanResult>('scan_steam_games', {
+        customPaths: pathsToScan,
+      });
+
+      setSteamPath(result.steam_path);
+      setLibraries(result.libraries);
+
+      // Merge scanned games with any custom user-added games
+      const allDiscovered = [...result.games];
+      for (const cg of customAddedGames) {
+        if (!allDiscovered.some((g) => g.appid === cg.appid)) {
+          allDiscovered.push(cg);
+        }
+      }
+      setGames(allDiscovered);
+
+      if (result.games.length > 0) {
+        toaster.create({
+          title: 'Scan Complete',
+          description: `Found ${result.games.length} games across ${result.libraries.length} drives/libraries.`,
+          type: 'success',
+        });
+      }
+    } catch (err) {
+      console.error('Scan error:', err);
+      toaster.create({
+        title: 'Scan Error',
+        description: String(err),
+        type: 'error',
+      });
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    scanLibraries();
+
+    // Check for app updates silently in background on startup
+    const timer = setTimeout(() => {
+      checkUpdate(undefined, false).catch(() => {});
+    }, 3500);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Track appids that we've already attempted to resolve this session to avoid redundant queries
+  const attemptedAppids = useRef<Set<number>>(new Set());
+
+  // Automatically resolve titles and artwork for any uninstalled games showing as "Steam Game #..."
+  useEffect(() => {
+    const unknownGames = games.filter(
+      (g) => g.name.startsWith('Steam Game #') && !attemptedAppids.current.has(g.appid)
+    );
+    if (unknownGames.length === 0) return;
+
+    // 1. Check local cache first for instant synchronous resolution
+    let cache: Record<number, { name: string; header_image?: string }> = {};
+    try {
+      const cacheRaw = localStorage.getItem('steam_app_metadata_cache_v1');
+      if (cacheRaw) cache = JSON.parse(cacheRaw);
+    } catch {}
+
+    let hasCachedUpdates = false;
+    const remainingToFetch: number[] = [];
+
+    const immediateUpdated = games.map((g) => {
+      const cached = cache[g.appid];
+      if (cached && g.name.startsWith('Steam Game #')) {
+        hasCachedUpdates = true;
+        return {
+          ...g,
+          name: cached.name,
+          header_image: cached.header_image || g.header_image,
+        };
+      }
+      if (g.name.startsWith('Steam Game #') && !attemptedAppids.current.has(g.appid)) {
+        remainingToFetch.push(g.appid);
+        attemptedAppids.current.add(g.appid);
+      }
+      return g;
+    });
+
+    if (hasCachedUpdates) {
+      setGames(immediateUpdated);
+    }
+
+    // 2. Fetch remaining unknown games in background via Tauri backend
+    if (remainingToFetch.length > 0) {
+      invoke<Array<{ appid: number; name: string; header_image?: string }>>(
+        'resolve_steam_apps_metadata',
+        { appids: remainingToFetch.slice(0, 25) }
+      )
+        .then((resolvedList) => {
+          if (resolvedList && resolvedList.length > 0) {
+            const newCache = { ...cache };
+            const resolvedMap = new Map<number, { name: string; header_image?: string }>();
+            for (const item of resolvedList) {
+              newCache[item.appid] = { name: item.name, header_image: item.header_image };
+              resolvedMap.set(item.appid, item);
+            }
+            try {
+              localStorage.setItem('steam_app_metadata_cache_v1', JSON.stringify(newCache));
+            } catch {}
+
+            setGames((prev) =>
+              prev.map((g) => {
+                const resolved = resolvedMap.get(g.appid);
+                if (resolved) {
+                  return {
+                    ...g,
+                    name: resolved.name,
+                    header_image: resolved.header_image || g.header_image,
+                  };
+                }
+                return g;
+              })
+            );
+          }
+        })
+        .catch((err) => {
+          console.warn('Could not resolve uninstalled app metadata:', err);
+        });
+    }
+  }, [games]);
+
+  // Filtered and Sorted Games
+  const filteredGames = useMemo(() => {
+    let result = [...games];
+
+    // Visibility filter (Installed vs Uninstalled vs Hidden)
+    // - Normal installed games show unless hidden.
+    // - If a game is uninstalled and hidden, it shows if EITHER filter is enabled (rather than requiring both).
+    // - An uninstalled game shows if showUninstalled is on.
+    // - A hidden game shows if showHidden is on.
+    result = result.filter((g) => isGameVisible(g, hiddenGameIds, showUninstalled, showHidden));
+
+    // 3. Search filter
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(
+        (g) =>
+          g.name.toLowerCase().includes(q) ||
+          g.appid.toString().includes(q) ||
+          g.install_dir.toLowerCase().includes(q)
+      );
+    }
+
+    // 4. Library filter
+    if (selectedLibrary !== 'all') {
+      result = result.filter((g) => {
+        if (g.is_installed) {
+          return g.library_path === selectedLibrary;
+        }
+        return true;
+      });
+    }
+
+    // Sort
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case 'name_asc':
+          return a.name.localeCompare(b.name);
+        case 'name_desc':
+          return b.name.localeCompare(a.name);
+        case 'size_desc':
+          return b.size_on_disk - a.size_on_disk;
+        case 'size_asc':
+          return a.size_on_disk - b.size_on_disk;
+        case 'updated_desc':
+          return b.last_updated - a.last_updated;
+        case 'appid_asc':
+          return a.appid - b.appid;
+        default:
+          return 0;
+      }
+    });
+
+    return result;
+  }, [games, search, selectedLibrary, sortBy, showHidden, showUninstalled, hiddenGameIds]);
+
+  const hiddenCount = useMemo(() => {
+    return games.filter((g) => hiddenGameIds.has(g.appid)).length;
+  }, [games, hiddenGameIds]);
+
+  const uninstalledCount = useMemo(() => {
+    return games.filter((g) => !g.is_installed).length;
+  }, [games]);
+
+  const installedCount = useMemo(() => {
+    return games.filter((g) => g.is_installed).length;
+  }, [games]);
 
   return (
-    <Container maxW="md" py="10">
-      <HStack justify="flex-end" mb="4">
-        <ColorModeButton />
-      </HStack>
+    <Box minH="100vh" bg="bg" color="fg" display="flex" flexDirection="column">
+      {/* Discord / Spotify Custom TitleBar */}
+      <TitleBar />
 
-      <VStack gap="6" textAlign="center">
-        <Heading size="2xl">Welcome to Tauri + React</Heading>
+      {/* Top Header */}
+      <Header
+        steamPath={steamPath}
+        totalGames={installedCount}
+        totalLibraries={libraries.length}
+        isScanning={isScanning}
+        onScan={() => scanLibraries()}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      />
 
-        <HStack justify="center" gap="4">
-          <a href="https://vite.dev" target="_blank">
-            <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-          </a>
-          <a href="https://tauri.app" target="_blank">
-            <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-          </a>
-          <a href="https://react.dev" target="_blank">
-            <img src={reactLogo} className="logo react" alt="React logo" />
-          </a>
-        </HStack>
-        <Text color="fg.muted">Click on the Tauri, Vite, and React logos to learn more.</Text>
+      {/* Filter and View Options */}
+      {games.length > 0 && (
+        <FilterBar
+          search={search}
+          onSearchChange={setSearch}
+          selectedLibrary={selectedLibrary}
+          onLibraryChange={setSelectedLibrary}
+          libraries={libraries}
+          sortBy={sortBy}
+          onSortChange={setSortBy}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          filteredCount={filteredGames.length}
+          totalCount={showUninstalled ? games.length : installedCount}
+          showHidden={showHidden}
+          onToggleShowHidden={() => setShowHidden(!showHidden)}
+          hiddenCount={hiddenCount}
+          showUninstalled={showUninstalled}
+          onToggleShowUninstalled={() => setShowUninstalled(!showUninstalled)}
+          uninstalledCount={uninstalledCount}
+          onOpenAddGame={() => setIsAddGameOpen(true)}
+        />
+      )}
 
-        <form
-          style={{ width: "100%" }}
-          onSubmit={(e) => {
-            e.preventDefault();
-            greet();
-          }}
-        >
-          <HStack gap="2">
-            <Input
-              id="greet-input"
-              value={name}
-              onChange={(e) => setName(e.currentTarget.value)}
-              placeholder="Enter a name..."
-            />
-            <Button colorPalette="blue" type="submit">
-              Greet
-            </Button>
-          </HStack>
-        </form>
-        {greetMsg && <Text fontWeight="medium">{greetMsg}</Text>}
-      </VStack>
-    </Container>
+      {/* Main Content Area */}
+      <Box flex="1" px={{ base: 4, md: 8 }} py={6}>
+        {isScanning ? (
+          <Flex justify="center" align="center" direction="column" minH="350px" gap={3}>
+            <Spinner size="xl" color="blue.500" />
+            <Text fontSize="md" fontWeight="medium">
+              Scanning drives for Steam games and manifests...
+            </Text>
+            <Text fontSize="xs" color="fg.muted">
+              Checking Windows drives, WSL mounts, and Steam library directories
+            </Text>
+          </Flex>
+        ) : games.length === 0 ? (
+          /* Pure No Steam Games Found View */
+          <Flex
+            direction="column"
+            align="center"
+            justify="center"
+            minH="400px"
+            p={8}
+            rounded="2xl"
+            borderWidth="1px"
+            borderStyle="dashed"
+            borderColor="border.subtle"
+            textAlign="center"
+            bg="bg.panel"
+          >
+            <Box p={4} rounded="full" bg="bg.muted" mb={3} color="fg.muted">
+              <LuHardDrive size={40} />
+            </Box>
+            <Heading size="lg" mb={2}>
+              No Steam Games Found
+            </Heading>
+            <Text fontSize="sm" color="fg.muted" maxW="460px" mb={6}>
+              We scanned all connected drives and common Steam locations, but did not detect any
+              installed Steam games. Click below to browse folders or select an unmounted drive.
+            </Text>
+
+            <HStack gap={3}>
+              <Button
+                size="md"
+                colorPalette="blue"
+                variant="solid"
+                onClick={() => scanLibraries()}
+              >
+                <LuFolderSync /> Rescan Drives
+              </Button>
+              <Button
+                size="md"
+                variant="subtle"
+                onClick={() => setIsFolderBrowserOpen(true)}
+              >
+                <LuFolderPlus /> Browse Drives & Folders
+              </Button>
+            </HStack>
+          </Flex>
+        ) : filteredGames.length === 0 ? (
+          <Flex
+            direction="column"
+            align="center"
+            justify="center"
+            minH="300px"
+            p={8}
+            rounded="2xl"
+            borderWidth="1px"
+            borderStyle="dashed"
+            borderColor="border.subtle"
+            textAlign="center"
+          >
+            <Box p={3} rounded="full" bg="bg.muted" mb={2} color="fg.muted">
+              <LuGamepad2 size={32} />
+            </Box>
+            <Heading size="md" mb={1}>
+              No Matching Games
+            </Heading>
+            <Text fontSize="sm" color="fg.muted" maxW="400px" mb={4}>
+              {search
+                ? `No games match "${search}". Try clearing your search.`
+                : 'All games in this drive filter may be hidden.'}
+            </Text>
+            <HStack gap={2}>
+              {search && (
+                <Button size="sm" variant="outline" onClick={() => setSearch('')}>
+                  Clear Search
+                </Button>
+              )}
+              {hiddenCount > 0 && !showHidden && (
+                <Button size="sm" colorPalette="orange" variant="subtle" onClick={() => setShowHidden(true)}>
+                  Show {hiddenCount} Hidden Games
+                </Button>
+              )}
+            </HStack>
+          </Flex>
+        ) : viewMode === 'grid' ? (
+          <Grid
+            templateColumns={{
+              base: 'repeat(2, 1fr)',
+              sm: 'repeat(3, 1fr)',
+              md: 'repeat(4, 1fr)',
+              lg: 'repeat(5, 1fr)',
+              xl: 'repeat(6, 1fr)',
+            }}
+            gap={5}
+          >
+            {filteredGames.map((game) => (
+              <GameCard
+                key={`${game.appid}-${game.library_path}`}
+                game={game}
+                isHidden={hiddenGameIds.has(game.appid)}
+                onSelect={(g) => handleOpenGame(g, 'downgrade')}
+                onToggleHide={(e, appid) => handleToggleHide(appid, e)}
+                onContextMenu={handleContextMenu}
+              />
+            ))}
+          </Grid>
+        ) : (
+          <VStack gap={3} align="stretch">
+            {filteredGames.map((game) => (
+              <GameRow
+                key={`${game.appid}-${game.library_path}`}
+                game={game}
+                isHidden={hiddenGameIds.has(game.appid)}
+                onSelect={(g) => handleOpenGame(g, 'downgrade')}
+                onToggleHide={(e, appid) => handleToggleHide(appid, e)}
+                onContextMenu={handleContextMenu}
+              />
+            ))}
+          </VStack>
+        )}
+      </Box>
+
+      {/* Game Details & Downgrade Modal */}
+      <GameDetailModal
+        game={selectedGame}
+        isOpen={Boolean(selectedGame)}
+        onClose={() => setSelectedGame(null)}
+        steamPath={steamPath}
+        isHidden={selectedGame ? hiddenGameIds.has(selectedGame.appid) : false}
+        onToggleHide={(appid) => handleToggleHide(appid)}
+        initialTab={detailModalTab}
+        onRefreshGame={() => scanLibraries()}
+        libraries={libraries}
+      />
+
+      {/* Add Game by AppID Modal */}
+      <AddGameModal
+        isOpen={isAddGameOpen}
+        onClose={() => setIsAddGameOpen(false)}
+        libraries={libraries}
+        onAddGame={handleAddCustomGame}
+      />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        steamPath={steamPath}
+        customPaths={customPaths}
+        onAddCustomPath={handleAddCustomPath}
+        onRemoveCustomPath={handleRemoveCustomPath}
+        onRescan={() => scanLibraries()}
+      />
+
+      {/* Folder Browser Modal */}
+      <FolderBrowserModal
+        isOpen={isFolderBrowserOpen}
+        onClose={() => setIsFolderBrowserOpen(false)}
+        onSelectFolder={(selectedPath) => {
+          handleAddCustomPath(selectedPath);
+          scanLibraries([...customPaths, selectedPath]);
+        }}
+        initialPath={steamPath || undefined}
+      />
+
+      {/* Custom Context Menu */}
+      <ContextMenu
+        state={contextMenu}
+        onClose={() => setContextMenu((prev) => ({ ...prev, isOpen: false }))}
+        onOpenGame={(game, tab) => handleOpenGame(game, tab || 'downgrade')}
+        isHidden={contextMenu.game ? hiddenGameIds.has(contextMenu.game.appid) : false}
+        onToggleHide={(appid) => handleToggleHide(appid)}
+      />
+    </Box>
   );
 }
 
