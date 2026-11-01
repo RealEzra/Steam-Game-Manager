@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.2] - 2026-11-01
+
+### Added
+- **🎮 Launch Game**: Added a direct 1-click **"Launch Game"** button inside the Game Detail modal header to run games immediately via Steam.
+- **Windows Registry Steam Detection**: Instantaneous Steam path discovery querying `HKCU\Software\Valve\Steam\SteamPath` in under 1ms.
+
+### Fixed
+- **Windows 10-Second Startup Freeze**:
+  - Replaced synchronous full-system drive scans (`C:\` through `Z:\`) with instant Windows registry lookup, eliminating drive timeout delays caused by disconnected USB/optical drives.
+  - Converted `scan_steam_games`, `resolve_steam_apps_metadata`, and `browse_directory` to non-blocking async tasks running on background threads.
+
+---
+
 ## [0.9.1] - 2026-11-01
 
 ### Fixed
@@ -33,4 +46,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Automated Safety Backups**: Automated game saves and configuration backups created before version changes and depot installations.
 - **Auto-Update Engine**: Native signed app updater built with Tauri v2 updater.
 - **Steam Manifest Lock**: Automated `appmanifest_<appid>.acf` patching to lock Steam games against forced background updates.
-

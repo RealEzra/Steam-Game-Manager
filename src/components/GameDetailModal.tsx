@@ -487,6 +487,23 @@ export function GameDetailModal({
     }
   };
 
+  const handleLaunchGame = async () => {
+    try {
+      await invoke('launch_steam_game', { appid: game.appid });
+      toaster.create({
+        title: 'Launching Game',
+        description: `Triggered Steam launch for ${game.name} (AppID ${game.appid})`,
+        type: 'success',
+      });
+    } catch (err) {
+      toaster.create({
+        title: 'Could not launch game',
+        description: String(err),
+        type: 'error',
+      });
+    }
+  };
+
   const handleRegisterInstalledGame = async () => {
     setIsRegistering(true);
     try {
@@ -695,6 +712,17 @@ export function GameDetailModal({
             </Box>
 
             <HStack gap={2}>
+              {game.is_installed && (
+                <Button
+                  size="sm"
+                  variant="solid"
+                  colorPalette="green"
+                  onClick={handleLaunchGame}
+                  title="Launch game through Steam"
+                >
+                  <LuPlay /> Launch Game
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="subtle"

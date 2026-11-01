@@ -10,13 +10,21 @@ use steam::{ScanResult, SteamManager};
 use vault::{VaultManager, VaultProfile};
 
 #[tauri::command]
-fn scan_steam_games(custom_paths: Vec<String>) -> ScanResult {
-    SteamManager::scan_all(&custom_paths)
+async fn scan_steam_games(custom_paths: Vec<String>) -> Result<ScanResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        SteamManager::scan_all(&custom_paths)
+    })
+    .await
+    .map_err(|e| format!("Scan error: {e}"))
 }
 
 #[tauri::command]
-fn browse_directory(path: Option<String>) -> Result<steam::DirectoryListing, String> {
-    SteamManager::browse_directory(path.as_deref())
+async fn browse_directory(path: Option<String>) -> Result<steam::DirectoryListing, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        SteamManager::browse_directory(path.as_deref())
+    })
+    .await
+    .map_err(|e| format!("Browse error: {e}"))?
 }
 
 #[tauri::command]
@@ -29,8 +37,12 @@ async fn get_steam_patch_notes(appid: u32, language: Option<String>) -> Result<V
 }
 
 #[tauri::command]
-fn resolve_steam_apps_metadata(appids: Vec<u32>) -> Vec<steam::SteamAppMetadata> {
-    SteamManager::resolve_multiple_steam_apps(appids)
+async fn resolve_steam_apps_metadata(appids: Vec<u32>) -> Result<Vec<steam::SteamAppMetadata>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        SteamManager::resolve_multiple_steam_apps(appids)
+    })
+    .await
+    .map_err(|e| format!("Metadata error: {e}"))
 }
 
 #[tauri::command]
@@ -341,6 +353,39 @@ fn open_steam_console() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn launch_steam_game(appid: u32) -> Result<(), String> {
+    let steam_url = format!("steam://run/{appid}");
+    #[cfg(target_os = "windows")]
+    {
+        crate::downloader::create_hidden_command("cmd")
+            .args(["/c", "start", &steam_url])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&steam_url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if std::path::Path::new("/mnt/c/Windows/System32/cmd.exe").exists() {
+            let _ = std::process::Command::new("/mnt/c/Windows/System32/cmd.exe")
+                .args(["/c", "start", &steam_url])
+                .spawn();
+            return Ok(());
+        }
+        std::process::Command::new("xdg-open")
+            .arg(&steam_url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 use std::sync::Mutex;
 use tauri::{PhysicalPosition, PhysicalSize};
 
@@ -503,6 +548,7 @@ pub fn run() {
             delete_vault_profile,
             open_folder,
             open_steam_console,
+            launch_steam_game,
             app_window_minimize,
             app_window_toggle_maximize,
             app_window_close,

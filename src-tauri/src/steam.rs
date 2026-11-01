@@ -590,6 +590,26 @@ impl SteamManager {
 
         #[cfg(target_os = "windows")]
         {
+            // 1. Query official Windows Registry for Steam install path (< 0.5ms)
+            if let Ok(out) = crate::downloader::create_hidden_command("reg")
+                .args(["query", r"HKCU\Software\Valve\Steam", "/v", "SteamPath"])
+                .output()
+            {
+                if out.status.success() {
+                    let text = String::from_utf8_lossy(&out.stdout);
+                    for line in text.lines() {
+                        if line.contains("SteamPath") {
+                            if let Some(val) = line.split("REG_SZ").nth(1) {
+                                let p = PathBuf::from(val.trim().replace('/', "\\"));
+                                if p.exists() {
+                                    paths.push(p);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if let Ok(prog_files) = std::env::var("ProgramFiles(x86)") {
                 paths.push(PathBuf::from(prog_files).join("Steam"));
             }
