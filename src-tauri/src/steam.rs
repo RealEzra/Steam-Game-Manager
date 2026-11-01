@@ -509,6 +509,7 @@ impl SteamManager {
         results
     }
 
+    #[allow(dead_code)]
     pub fn windows_path_to_wsl(win_path: &str) -> Option<PathBuf> {
         let chars: Vec<char> = win_path.chars().collect();
         if chars.len() >= 2 && chars[1] == ':' {
@@ -973,6 +974,7 @@ impl SteamManager {
                                                 _ => None,
                                             });
 
+                                        #[allow(unused_mut)]
                                         let mut lib_buf = PathBuf::from(raw_p);
 
                                         // If running on Linux/WSL and the path is a Windows path (e.g. D:\SteamLibrary),
