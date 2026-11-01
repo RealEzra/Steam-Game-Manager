@@ -38,7 +38,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgzNkFGRUIzNDFBREQ2RTIKUldUaTFxMUJzLzVxZ3hjTHpzTEZmc0F1MTZQM0pkMVg0M2R0V0l2NHk4VkpFalpCRXJMVkRDeDcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxRjA0ODIxRUU1MkY1MDcKUldRSDlWTHVJVWp3a1Z0bE9hekpQWFdtZlovd2FMVzN4MWZpS25iL2tiSXVla09INW52SmJSSTEK",
       "endpoints": [
         "https://github.com/RealEzra/steam-game-manager/releases/latest/download/latest.json"
       ]
