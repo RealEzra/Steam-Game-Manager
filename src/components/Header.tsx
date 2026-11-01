@@ -8,7 +8,8 @@ import {
   Text,
 } from '@chakra-ui/react';
 import { ColorModeButton } from '@/components/ui/color-mode';
-import { LuFolderSync, LuGamepad2, LuHardDrive, LuSettings } from 'react-icons/lu';
+import { LuFolderSync, LuHardDrive, LuSettings } from 'react-icons/lu';
+import { useAppAccent } from '@/utils/theme';
 
 interface HeaderProps {
   steamPath: string | null;
@@ -27,9 +28,12 @@ export function Header({
   onScan,
   onOpenSettings,
 }: HeaderProps) {
+  const { palette } = useAppAccent();
+
   return (
     <Box
       data-tauri-drag-region
+      onContextMenu={(e) => e.preventDefault()}
       borderBottomWidth="1px"
       borderColor="border.subtle"
       bg="bg.panel"
@@ -49,15 +53,17 @@ export function Header({
       >
         <HStack gap={3}>
           <Box
-            p={2}
             rounded="xl"
-            bgGradient="to-br"
-            gradientFrom="blue.500"
-            gradientTo="purple.600"
-            color="white"
+            overflow="hidden"
             boxShadow="sm"
+            w="42px"
+            h="42px"
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            flexShrink={0}
           >
-            <LuGamepad2 size={26} />
+            <img src="/app-icon.svg" width="42" height="42" alt="Steam Game Manager" />
           </Box>
           <Box>
             <HStack gap={2}>
@@ -87,7 +93,7 @@ export function Header({
           <Button
             size="sm"
             variant="subtle"
-            colorPalette="blue"
+            colorPalette={palette}
             loading={isScanning}
             onClick={onScan}
           >

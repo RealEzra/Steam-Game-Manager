@@ -29,6 +29,7 @@ import {
 import { SteamGame, VaultProfile } from '@/types';
 import { formatBytes, formatDate } from '@/utils/format';
 import { invoke } from '@tauri-apps/api/core';
+import { useAppAccent } from '@/utils/theme';
 
 interface VaultBrowserProps {
   game: SteamGame;
@@ -47,6 +48,7 @@ export function VaultBrowser({
   selectedVersionName,
   onProfileSwitched,
 }: VaultBrowserProps) {
+  const { palette, colorHex } = useAppAccent();
   const [profiles, setProfiles] = useState<VaultProfile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSwitchingId, setIsSwitchingId] = useState<string | null>(null);
@@ -274,7 +276,7 @@ export function VaultBrowser({
         <Flex justify="space-between" align="center" gap={4} flexWrap={{ base: 'wrap', md: 'nowrap' }}>
           <Box minW={0} flex="1">
             <HStack gap={2} mb={1} wrap="wrap">
-              <Badge colorPalette="blue" size="sm" variant="solid">
+              <Badge colorPalette={palette} size="sm" variant="solid">
                 <LuHardDrive /> Currently Installed
               </Badge>
               <Badge colorPalette="purple" size="sm">
@@ -298,7 +300,7 @@ export function VaultBrowser({
           <HStack gap={2} flexShrink={0}>
             <Button
               size="sm"
-              colorPalette="blue"
+              colorPalette={palette}
               variant={showSnapshotForm ? 'subtle' : 'solid'}
               onClick={() => setShowSnapshotForm(!showSnapshotForm)}
             >
@@ -324,10 +326,10 @@ export function VaultBrowser({
             rounded="lg"
             bg="bg.panel"
             borderWidth="1px"
-            borderColor="blue.500"
+            borderColor={colorHex}
             animation="scale-fade-in 0.15s ease-out"
           >
-            <Heading size="xs" mb={1} color="blue.500">
+            <Heading size="xs" mb={1} color={colorHex}>
               📸 Snapshot Current Live Build to Vault
             </Heading>
             <Text fontSize="2xs" color="fg.muted" mb={3}>
@@ -350,7 +352,7 @@ export function VaultBrowser({
               </Box>
               <Button
                 size="sm"
-                colorPalette="blue"
+                colorPalette={palette}
                 loading={isSnapshotting}
                 onClick={handleSnapshotCurrent}
               >
@@ -483,7 +485,7 @@ export function VaultBrowser({
         <Flex justify="space-between" align="center" mb={3}>
           <HStack gap={2}>
             <Heading size="sm">Cached Build Profiles ({profiles.length})</Heading>
-            <Badge colorPalette="blue" size="xs">
+            <Badge colorPalette={palette} size="xs">
               Instant 1-Click Swap
             </Badge>
           </HStack>
@@ -514,7 +516,7 @@ export function VaultBrowser({
             </Text>
             <Button
               size="sm"
-              colorPalette="blue"
+              colorPalette={palette}
               variant="subtle"
               mt={4}
               onClick={() => setShowSnapshotForm(true)}
@@ -580,7 +582,7 @@ export function VaultBrowser({
                     ) : (
                       <Button
                         size="sm"
-                        colorPalette="blue"
+                        colorPalette={palette}
                         variant="solid"
                         loading={isSwitchingId === profile.id}
                         onClick={() => handleSwitchProfile(profile)}
@@ -619,7 +621,7 @@ export function VaultBrowser({
       {/* How it works info box */}
       <Box p={3.5} rounded="lg" bg="bg.muted" borderWidth="1px" borderColor="border.subtle">
         <HStack gap={2} mb={1}>
-          <LuInfo size={14} color="var(--chakra-colors-blue-500)" />
+          <LuInfo size={14} color={colorHex} />
           <Text fontSize="xs" fontWeight="semibold">
             How Quick Build Switching Works
           </Text>

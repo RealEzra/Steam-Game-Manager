@@ -16,17 +16,19 @@ describe('isGameVisible filter logic', () => {
     expect(isGameVisible(uninstalledHidden, hiddenSet, false, false)).toBe(false);
   });
 
-  it('shows uninstalled and hidden games if showUninstalled is on', () => {
-    // Uninstalled + hidden game shows when showUninstalled=true
-    expect(isGameVisible(uninstalledHidden, hiddenSet, true, false)).toBe(true);
+  it('does NOT show hidden games in uninstalled when showHidden is off', () => {
+    // Uninstalled normal shows
     expect(isGameVisible(uninstalledNormal, hiddenSet, true, false)).toBe(true);
+    // Uninstalled hidden must NOT show in uninstalled if showHidden is false
+    expect(isGameVisible(uninstalledHidden, hiddenSet, true, false)).toBe(false);
     // Hidden installed still hidden
     expect(isGameVisible(installedHidden, hiddenSet, true, false)).toBe(false);
   });
 
-  it('shows uninstalled and hidden games if showHidden is on', () => {
-    // Uninstalled + hidden game shows when showHidden=true
-    expect(isGameVisible(uninstalledHidden, hiddenSet, false, true)).toBe(true);
+  it('only shows installed hidden games when showHidden is on (uninstalled stay hidden)', () => {
+    // Uninstalled hidden does not show without showUninstalled
+    expect(isGameVisible(uninstalledHidden, hiddenSet, false, true)).toBe(false);
+    // Installed hidden shows
     expect(isGameVisible(installedHidden, hiddenSet, false, true)).toBe(true);
     // Uninstalled normal still hidden
     expect(isGameVisible(uninstalledNormal, hiddenSet, false, true)).toBe(false);

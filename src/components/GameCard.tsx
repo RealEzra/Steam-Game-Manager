@@ -12,6 +12,8 @@ import {
 import { LuDownload, LuEye, LuEyeOff, LuHardDrive, LuLayers } from 'react-icons/lu';
 import { SteamGame } from '@/types';
 import { formatBytes } from '@/utils/format';
+import { useGameManifestStats } from '@/utils/knownVersions';
+import { useAppAccent } from '@/utils/theme';
 
 interface GameCardProps {
   game: SteamGame;
@@ -34,12 +36,15 @@ export function GameCard({
   // 1. cover_image (library_600x900.jpg)
   // 2. header_image (header.jpg / dynamic hashed CDN)
   // 3. hero_image (library_hero.jpg - available even for newer games like Forza Horizon 6 & Gamble With Your Friends)
-  // 4. storepagebackground (storepagebackground/app/{appid})
+  // 4. capsule_616x353.jpg (Steam standard store capsule)
+  // 5. storepagebackground (storepagebackground/app/{appid})
   const imageCandidates = useMemo(() => {
     const list: string[] = [];
     if (game.cover_image) list.push(game.cover_image);
     if (game.header_image) list.push(game.header_image);
     if (game.hero_image) list.push(game.hero_image);
+    list.push(`https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${game.appid}/capsule_616x353.jpg`);
+    list.push(`https://cdn.cloudflare.steamstatic.com/steam/apps/${game.appid}/capsule_616x353.jpg`);
     list.push(`https://store.akamai.steamstatic.com/images/storepagebackground/app/${game.appid}`);
     return list;
   }, [game.cover_image, game.header_image, game.hero_image, game.appid]);
@@ -51,6 +56,8 @@ export function GameCard({
   const imgSrc = fallbackIndex < imageCandidates.length ? imageCandidates[fallbackIndex] : null;
 
   const isUninstalled = !game.is_installed;
+  const { depotCount, manifestCount } = useGameManifestStats(game);
+  const { colorHex, palette } = useAppAccent();
 
   return (
     <Box
@@ -74,7 +81,7 @@ export function GameCard({
       _hover={{
         transform: 'translateY(-4px)',
         shadow: 'lg',
-        borderColor: isHidden ? 'orange.500' : isUninstalled ? 'purple.500' : 'blue.500',
+        borderColor: isHidden ? 'orange.500' : isUninstalled ? 'purple.500' : colorHex,
         opacity: isUninstalled ? 0.95 : 1,
       }}
       display="flex"
@@ -193,7 +200,7 @@ export function GameCard({
         >
           <Button
             size="sm"
-            colorPalette={game.is_installed ? 'blue' : 'purple'}
+            colorPalette={game.is_installed ? palette : 'purple'}
             variant="solid"
             onClick={(e) => {
               e.stopPropagation();
@@ -218,15 +225,25 @@ export function GameCard({
           {game.name}
         </Heading>
 
-        <Flex justify="space-between" align="center" fontSize="xs" color="fg.muted">
-          <HStack gap={1}>
+        <Flex justify="space-between" align="center" fontSize="xs" color="fg.muted" gap={2}>
+          <HStack gap={1} flexShrink={0} whiteSpace="nowrap">
             <LuHardDrive size={13} />
-            <Text>{game.is_installed ? formatBytes(game.size_on_disk) : 'Not Installed'}</Text>
+            <Text whiteSpace="nowrap">{game.is_installed ? formatBytes(game.size_on_disk) : 'Not Installed'}</Text>
           </HStack>
 
-          <HStack gap={1}>
+          <HStack
+            gap={1}
+            flexShrink={0}
+            whiteSpace="nowrap"
+            title={`${depotCount} ${depotCount === 1 ? 'depot' : 'depots'} • ${manifestCount} total ${manifestCount === 1 ? 'manifest' : 'manifests'} (installed, presets, local cache & SteamDB)`}
+          >
             <LuLayers size={13} />
-            <Text>{game.is_installed ? `${Object.keys(game.mounted_depots).length} depots` : 'Uninstalled'}</Text>
+            <Text whiteSpace="nowrap">
+              <Text as="span" display={{ base: 'none', '2xl': 'inline' }}>
+                {depotCount} {depotCount === 1 ? 'depot' : 'depots'} •{' '}
+              </Text>
+              {manifestCount} {manifestCount === 1 ? 'manifest' : 'manifests'}
+            </Text>
           </HStack>
         </Flex>
       </Box>

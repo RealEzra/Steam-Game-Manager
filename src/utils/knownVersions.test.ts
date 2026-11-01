@@ -1,13 +1,27 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, beforeEach } from 'bun:test';
 import {
+  clearCustomVersions,
   getAllVersionsForDepot,
   getDepotLabel,
+  getGameManifestStats,
   isPatchNoteInLanguage,
   matchManifestsToPatchNotes,
   normalizeDate,
   parseSteamDbManifests,
+  saveMultipleCustomVersions,
 } from './knownVersions';
-import { BuildVersion, SteamPatchNote } from '@/types';
+import { BuildVersion, SteamGame, SteamPatchNote } from '@/types';
+
+// In-memory localStorage polyfill for test environment
+const store = new Map<string, string>();
+if (typeof globalThis.localStorage === 'undefined') {
+  (globalThis as any).localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, String(value)),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+  };
+}
 
 describe('knownVersions', () => {
   it('loads preset versions for Crimson Desert depot 3321461', () => {
@@ -241,5 +255,156 @@ Date	Manifest ID
     // English user should not receive Russian patch note
     const matched = matchManifestsToPatchNotes(versions, patchNotes, 'en');
     expect(matched[0].description || '').not.toContain('Ещё одна заплатка');
+  });
+
+  describe('getGameManifestStats', () => {
+    it('counts installed mounted depots and manifests', () => {
+      const mockGame: SteamGame = {
+        appid: 123456,
+        name: 'Test Game',
+        install_dir: 'test',
+        full_path: '/path/test',
+        library_path: '/path',
+        size_on_disk: 1000,
+        build_id: '100',
+        last_updated: 0,
+        mounted_depots: {
+          '123457': '99900011122233344',
+          '123458': '99900011122233355',
+        },
+        cover_image: '',
+        header_image: '',
+        hero_image: '',
+        steamdb_url: '',
+        is_installed: true,
+      };
+
+      const stats = getGameManifestStats(mockGame);
+      expect(stats.depotCount).toBe(2);
+      expect(stats.manifestCount).toBe(2);
+    });
+
+    it('aggregates manifests added from SteamDB or local depotcache in localStorage', () => {
+      const appid = 888123;
+      const depotId = '888124';
+      clearCustomVersions(appid, depotId);
+
+      const mockGame: SteamGame = {
+        appid,
+        name: 'Custom Depot Game',
+        install_dir: 'custom',
+        full_path: '/path/custom',
+        library_path: '/path',
+        size_on_disk: 1000,
+        build_id: '100',
+        last_updated: 0,
+        mounted_depots: {
+          [depotId]: '1111222233334444',
+        },
+        cover_image: '',
+        header_image: '',
+        hero_image: '',
+        steamdb_url: '',
+        is_installed: true,
+      };
+
+      // Before custom versions: 1 depot, 1 manifest
+      const initialStats = getGameManifestStats(mockGame);
+      expect(initialStats.depotCount).toBe(1);
+      expect(initialStats.manifestCount).toBe(1);
+
+      // Add 3 manifests from SteamDB / local depotcache
+      saveMultipleCustomVersions(appid, depotId, [
+        {
+          id: 'steamdb_2222333344445555',
+          versionName: 'Patch 1.1',
+          manifestId: '2222333344445555',
+        },
+        {
+          id: 'steamdb_3333444455556666',
+          versionName: 'Patch 1.2',
+          manifestId: '3333444455556666',
+        },
+        {
+          id: 'local_4444555566667777',
+          versionName: 'Local Cache Build',
+          manifestId: '4444555566667777',
+        },
+      ]);
+
+      const updatedStats = getGameManifestStats(mockGame);
+      expect(updatedStats.depotCount).toBe(1);
+      // 1 installed + 3 custom = 4 manifests
+      expect(updatedStats.manifestCount).toBe(4);
+
+      // Clean up
+      clearCustomVersions(appid, depotId);
+    });
+
+    it('aggregates canonical preset versions for games with presets', () => {
+      // Skyrim SE (489830) has multiple presets defined in PRESET_VERSIONS
+      const skyrimGame: SteamGame = {
+        appid: 489830,
+        name: 'The Elder Scrolls V: Skyrim Special Edition',
+        install_dir: 'Skyrim Special Edition',
+        full_path: '/path/skyrim',
+        library_path: '/path',
+        size_on_disk: 12000000000,
+        build_id: '999999',
+        last_updated: 0,
+        mounted_depots: {
+          '489831': '9999999999999999', // Installed manifest
+        },
+        cover_image: '',
+        header_image: '',
+        hero_image: '',
+        steamdb_url: '',
+        is_installed: true,
+      };
+
+      const stats = getGameManifestStats(skyrimGame);
+      // Presets exist for 489831
+      expect(stats.manifestCount).toBeGreaterThan(3);
+    });
+
+    it('counts manifests for uninstalled games with 0 mounted depots', () => {
+      const appid = 777123;
+      const depotId = '777124';
+      clearCustomVersions(appid, depotId);
+
+      const uninstalledGame: SteamGame = {
+        appid,
+        name: 'Uninstalled Test Game',
+        install_dir: 'uninstalled',
+        full_path: '',
+        library_path: '',
+        size_on_disk: 0,
+        build_id: '',
+        last_updated: 0,
+        mounted_depots: {},
+        cover_image: '',
+        header_image: '',
+        hero_image: '',
+        steamdb_url: '',
+        is_installed: false,
+      };
+
+      expect(getGameManifestStats(uninstalledGame).manifestCount).toBe(0);
+
+      // User pastes manifests from SteamDB for this uninstalled game
+      saveMultipleCustomVersions(appid, depotId, [
+        {
+          id: 'steamdb_1010101010101010',
+          versionName: 'Release 1.0',
+          manifestId: '1010101010101010',
+        },
+      ]);
+
+      const stats = getGameManifestStats(uninstalledGame);
+      expect(stats.depotCount).toBe(1);
+      expect(stats.manifestCount).toBe(1);
+
+      clearCustomVersions(appid, depotId);
+    });
   });
 });

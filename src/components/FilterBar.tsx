@@ -17,6 +17,8 @@ import {
   LuSearch,
 } from 'react-icons/lu';
 import { SteamLibrary } from '@/types';
+import { AppSelect } from '@/components/ui/AppSelect';
+import { useAppAccent } from '@/utils/theme';
 
 export type SortOption =
   | 'name_asc'
@@ -25,6 +27,8 @@ export type SortOption =
   | 'size_asc'
   | 'updated_desc'
   | 'appid_asc';
+
+export type GridSize = 'compact' | 'medium' | 'large';
 
 interface FilterBarProps {
   search: string;
@@ -36,6 +40,8 @@ interface FilterBarProps {
   onSortChange: (sort: SortOption) => void;
   viewMode: 'grid' | 'list';
   onViewModeChange: (mode: 'grid' | 'list') => void;
+  gridSize?: GridSize;
+  onGridSizeChange?: (size: GridSize) => void;
   filteredCount: number;
   totalCount: number;
   showHidden: boolean;
@@ -57,6 +63,8 @@ export function FilterBar({
   onSortChange,
   viewMode,
   onViewModeChange,
+  gridSize = 'medium',
+  onGridSizeChange,
   filteredCount,
   totalCount,
   showHidden,
@@ -67,6 +75,25 @@ export function FilterBar({
   uninstalledCount,
   onOpenAddGame,
 }: FilterBarProps) {
+  const { palette } = useAppAccent();
+
+  const driveOptions = [
+    { value: 'all', label: `All Drives (${totalCount})` },
+    ...libraries.map((lib) => ({
+      value: lib.path,
+      label: `${lib.label} (${lib.total_games})`,
+    })),
+  ];
+
+  const sortOptions = [
+    { value: 'name_asc', label: 'Name (A-Z)' },
+    { value: 'name_desc', label: 'Name (Z-A)' },
+    { value: 'size_desc', label: 'Size (Largest first)' },
+    { value: 'size_asc', label: 'Size (Smallest first)' },
+    { value: 'updated_desc', label: 'Recently Updated' },
+    { value: 'appid_asc', label: 'App ID' },
+  ];
+
   return (
     <Box
       py={3}
@@ -107,51 +134,21 @@ export function FilterBar({
         <HStack gap={3} wrap="wrap" justify={{ base: 'space-between', md: 'flex-end' }}>
           {/* Drive Filter Dropdown */}
           {libraries.length > 0 && (
-            <select
+            <AppSelect
               value={selectedLibrary}
-              onChange={(e) => onLibraryChange(e.target.value)}
-              style={{
-                height: '32px',
-                fontSize: '13px',
-                borderRadius: '8px',
-                padding: '0 10px',
-                background: 'var(--chakra-colors-bg-muted)',
-                color: 'var(--chakra-colors-fg)',
-                border: '1px solid var(--chakra-colors-border-subtle)',
-                outline: 'none',
-              }}
-            >
-              <option value="all">All Drives ({totalCount})</option>
-              {libraries.map((lib) => (
-                <option key={lib.path} value={lib.path}>
-                  {lib.label} ({lib.total_games})
-                </option>
-              ))}
-            </select>
+              onChange={onLibraryChange}
+              options={driveOptions}
+              minWidth="145px"
+            />
           )}
 
           {/* Sort dropdown */}
-          <select
+          <AppSelect
             value={sortBy}
-            onChange={(e) => onSortChange(e.target.value as SortOption)}
-            style={{
-              height: '32px',
-              fontSize: '13px',
-              borderRadius: '8px',
-              padding: '0 10px',
-              background: 'var(--chakra-colors-bg-muted)',
-              color: 'var(--chakra-colors-fg)',
-              border: '1px solid var(--chakra-colors-border-subtle)',
-              outline: 'none',
-            }}
-          >
-            <option value="name_asc">Name (A-Z)</option>
-            <option value="name_desc">Name (Z-A)</option>
-            <option value="size_desc">Size (Largest first)</option>
-            <option value="size_asc">Size (Smallest first)</option>
-            <option value="updated_desc">Recently Updated</option>
-            <option value="appid_asc">App ID</option>
-          </select>
+            onChange={(val) => onSortChange(val as SortOption)}
+            options={sortOptions}
+            minWidth="155px"
+          />
 
           {/* Uninstalled Games Toggle (Hidden by default) */}
           <Button
@@ -181,18 +178,60 @@ export function FilterBar({
           <Button
             size="xs"
             variant="subtle"
-            colorPalette="blue"
+            colorPalette={palette}
             onClick={onOpenAddGame}
           >
             <LuPlus /> Add Game
           </Button>
+
+          {/* Grid Size Switcher (only when in grid view) */}
+          {viewMode === 'grid' && onGridSizeChange && (
+            <HStack gap={0.5} bg="bg.muted" p={0.5} rounded="lg" borderWidth="1px" borderColor="border.subtle">
+              <Button
+                size="2xs"
+                variant={gridSize === 'compact' ? 'solid' : 'ghost'}
+                colorPalette={gridSize === 'compact' ? palette : 'gray'}
+                px={1.5}
+                h="24px"
+                minW="24px"
+                onClick={() => onGridSizeChange('compact')}
+                title="Compact Grid"
+              >
+                S
+              </Button>
+              <Button
+                size="2xs"
+                variant={gridSize === 'medium' ? 'solid' : 'ghost'}
+                colorPalette={gridSize === 'medium' ? palette : 'gray'}
+                px={1.5}
+                h="24px"
+                minW="24px"
+                onClick={() => onGridSizeChange('medium')}
+                title="Medium Grid"
+              >
+                M
+              </Button>
+              <Button
+                size="2xs"
+                variant={gridSize === 'large' ? 'solid' : 'ghost'}
+                colorPalette={gridSize === 'large' ? palette : 'gray'}
+                px={1.5}
+                h="24px"
+                minW="24px"
+                onClick={() => onGridSizeChange('large')}
+                title="Large Grid"
+              >
+                L
+              </Button>
+            </HStack>
+          )}
 
           {/* View Mode Buttons */}
           <HStack gap={1} bg="bg.muted" p={0.5} rounded="lg" borderWidth="1px" borderColor="border.subtle">
             <IconButton
               size="xs"
               variant={viewMode === 'grid' ? 'solid' : 'ghost'}
-              colorPalette={viewMode === 'grid' ? 'blue' : 'gray'}
+              colorPalette={viewMode === 'grid' ? palette : 'gray'}
               aria-label="Grid view"
               onClick={() => onViewModeChange('grid')}
             >
@@ -201,7 +240,7 @@ export function FilterBar({
             <IconButton
               size="xs"
               variant={viewMode === 'list' ? 'solid' : 'ghost'}
-              colorPalette={viewMode === 'list' ? 'blue' : 'gray'}
+              colorPalette={viewMode === 'list' ? palette : 'gray'}
               aria-label="List view"
               onClick={() => onViewModeChange('list')}
             >

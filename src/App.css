@@ -6,19 +6,119 @@
   filter: drop-shadow(0 0 2em #61dafb);
 }
 :root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Microsoft YaHei", Meiryo, "Malgun Gothic", sans-serif;
   font-size: 16px;
   line-height: 24px;
   font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+
+  --app-accent: #3b82f6;
+  --app-accent-gradient: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  --app-accent-glow: rgba(59, 130, 246, 0.35);
+}
+
+html[data-accent-color="purple"] {
+  --app-accent: #a855f7;
+  --app-accent-gradient: linear-gradient(135deg, #a855f7, #7e22ce);
+  --app-accent-glow: rgba(168, 85, 247, 0.35);
+}
+
+html[data-accent-color="emerald"] {
+  --app-accent: #10b981;
+  --app-accent-gradient: linear-gradient(135deg, #10b981, #047857);
+  --app-accent-glow: rgba(16, 185, 129, 0.35);
+}
+
+html[data-accent-color="cyan"] {
+  --app-accent: #06b6d4;
+  --app-accent-gradient: linear-gradient(135deg, #06b6d4, #0e7490);
+  --app-accent-glow: rgba(6, 182, 212, 0.35);
+}
+
+html[data-accent-color="orange"] {
+  --app-accent: #f97316;
+  --app-accent-gradient: linear-gradient(135deg, #f97316, #c2410c);
+  --app-accent-glow: rgba(249, 115, 22, 0.35);
+}
+
+html[data-accent-color="crimson"] {
+  --app-accent: #ef4444;
+  --app-accent-gradient: linear-gradient(135deg, #ef4444, #b91c1c);
+  --app-accent-glow: rgba(239, 68, 68, 0.35);
+}
+
+html[data-accent-color="pink"] {
+  --app-accent: #f43f5e;
+  --app-accent-gradient: linear-gradient(135deg, #f43f5e, #be123c);
+  --app-accent-glow: rgba(244, 63, 94, 0.35);
+}
+
+html.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+  color: #f4f4f5;
+  background-color: #09090b;
+}
+
+html.light,
+[data-theme="light"] {
+  color-scheme: light;
+  color: #18181b;
+  background-color: #ffffff;
+}
+
+select,
+option,
+input,
+button {
+  font-family: inherit;
+}
+
+/* Custom dropdown style supporting automatic light and dark mode */
+.app-select {
+  font-family: inherit;
+  font-size: 13px;
+  height: 32px;
+  border-radius: 8px;
+  padding: 0 10px;
+  border-width: 1px;
+  border-style: solid;
+  outline: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+html.dark .app-select,
+[data-theme="dark"] .app-select {
+  color-scheme: dark;
+  background-color: var(--chakra-colors-bg-muted, #18181b);
+  color: var(--chakra-colors-fg, #f4f4f5);
+  border-color: var(--chakra-colors-border-subtle, #27272a);
+}
+
+html.light .app-select,
+[data-theme="light"] .app-select {
+  color-scheme: light;
+  background-color: var(--chakra-colors-bg-muted, #f4f4f5);
+  color: var(--chakra-colors-fg, #09090b);
+  border-color: var(--chakra-colors-border-subtle, #e4e4e7);
+}
+
+html.dark select option,
+[data-theme="dark"] select option {
+  background-color: #18181b;
+  color: #f4f4f5;
+}
+
+html.light select option,
+[data-theme="light"] select option {
+  background-color: #ffffff;
+  color: #09090b;
 }
 
 .container {

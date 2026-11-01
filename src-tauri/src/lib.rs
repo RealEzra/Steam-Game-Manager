@@ -257,6 +257,18 @@ fn open_steam_console() -> Result<(), String> {
     Ok(())
 }
 
+use std::sync::Mutex;
+use tauri::{PhysicalPosition, PhysicalSize};
+
+#[derive(Clone, Copy)]
+struct SavedWindowBounds {
+    pos: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+}
+
+static LAST_UNMAXIMIZED_BOUNDS: Mutex<Option<SavedWindowBounds>> = Mutex::new(None);
+static IS_CUSTOM_MAXIMIZED: Mutex<bool> = Mutex::new(false);
+
 #[tauri::command]
 fn app_window_minimize(window: tauri::Window) -> Result<(), String> {
     window.minimize().map_err(|e| e.to_string())
@@ -264,11 +276,80 @@ fn app_window_minimize(window: tauri::Window) -> Result<(), String> {
 
 #[tauri::command]
 fn app_window_toggle_maximize(window: tauri::Window) -> Result<bool, String> {
-    let is_max = window.is_maximized().map_err(|e| e.to_string())?;
-    if is_max {
-        window.unmaximize().map_err(|e| e.to_string())?;
+    let custom_max = {
+        let mut guard = IS_CUSTOM_MAXIMIZED.lock().unwrap_or_else(|e| e.into_inner());
+        let val = *guard;
+        if val {
+            *guard = false;
+        }
+        val
+    };
+    let native_max = window.is_maximized().unwrap_or(false);
+
+    if custom_max || native_max {
+        if native_max {
+            let _ = window.unmaximize();
+        }
+        if let Ok(mut guard) = LAST_UNMAXIMIZED_BOUNDS.lock() {
+            if let Some(bounds) = guard.take() {
+                let _ = window.set_position(tauri::Position::Physical(bounds.pos));
+                let _ = window.set_size(tauri::Size::Physical(bounds.size));
+            }
+        }
         Ok(false)
     } else {
+        // Record pre-maximize position and size
+        if let (Ok(current_pos), Ok(current_size)) = (window.outer_position(), window.outer_size()) {
+            if let Ok(mut guard) = LAST_UNMAXIMIZED_BOUNDS.lock() {
+                *guard = Some(SavedWindowBounds {
+                    pos: current_pos,
+                    size: current_size,
+                });
+            }
+        }
+
+        // Determine target monitor: check current_monitor() or locate which monitor bounds contain the window center
+        let target_monitor = if let Ok(Some(m)) = window.current_monitor() {
+            Some(m)
+        } else if let (Ok(outer_pos), Ok(outer_size), Ok(monitors)) = (
+            window.outer_position(),
+            window.outer_size(),
+            window.available_monitors(),
+        ) {
+            let cx = outer_pos.x + (outer_size.width as i32) / 2;
+            let cy = outer_pos.y + (outer_size.height as i32) / 2;
+            monitors.into_iter().find(|m| {
+                let p = m.position();
+                let s = m.size();
+                cx >= p.x && cx < (p.x + s.width as i32) && cy >= p.y && cy < (p.y + s.height as i32)
+            })
+        } else {
+            None
+        };
+
+        if let Some(monitor) = target_monitor {
+            let m_pos = monitor.position();
+            let m_size = monitor.size();
+
+            // On secondary monitors (or under WSLg/Weston compositor), calling native maximize causes
+            // the window manager to ignore the secondary screen and throw the window onto the primary display.
+            // Explicitly setting the position and size to match monitor bounds keeps it reliably on the current screen.
+            let is_secondary = m_pos.x != 0 || m_pos.y != 0;
+
+            if is_secondary {
+                let _ = window.set_position(tauri::Position::Physical(*m_pos));
+                let _ = window.set_size(tauri::Size::Physical(*m_size));
+                if let Ok(mut guard) = IS_CUSTOM_MAXIMIZED.lock() {
+                    *guard = true;
+                }
+                return Ok(true);
+            } else {
+                let _ = window.set_position(tauri::Position::Physical(*m_pos));
+                window.maximize().map_err(|e| e.to_string())?;
+                return Ok(true);
+            }
+        }
+
         window.maximize().map_err(|e| e.to_string())?;
         Ok(true)
     }
@@ -281,7 +362,9 @@ fn app_window_close(window: tauri::Window) -> Result<(), String> {
 
 #[tauri::command]
 fn app_window_is_maximized(window: tauri::Window) -> Result<bool, String> {
-    window.is_maximized().map_err(|e| e.to_string())
+    let custom_max = *IS_CUSTOM_MAXIMIZED.lock().unwrap_or_else(|e| e.into_inner());
+    let native_max = window.is_maximized().unwrap_or(false);
+    Ok(custom_max || native_max)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

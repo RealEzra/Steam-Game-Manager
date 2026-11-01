@@ -13,7 +13,8 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { TitleBar } from '@/components/TitleBar';
 import { Header } from '@/components/Header';
-import { FilterBar, SortOption } from '@/components/FilterBar';
+import { FilterBar, GridSize, SortOption } from '@/components/FilterBar';
+import { useAppAccent } from '@/utils/theme';
 import { GameCard } from '@/components/GameCard';
 import { GameRow } from '@/components/GameRow';
 import { GameDetailModal } from '@/components/GameDetailModal';
@@ -28,6 +29,7 @@ import { checkUpdate } from '@/utils/updater';
 import { LuFolderPlus, LuFolderSync, LuGamepad2, LuHardDrive } from 'react-icons/lu';
 
 export function App() {
+  const { palette, colorHex } = useAppAccent();
   const [games, setGames] = useState<SteamGame[]>([]);
   const [libraries, setLibraries] = useState<SteamLibrary[]>([]);
   const [steamPath, setSteamPath] = useState<string | null>(null);
@@ -71,6 +73,22 @@ export function App() {
   const [selectedLibrary, setSelectedLibrary] = useState('all');
   const [sortBy, setSortBy] = useState<SortOption>('name_asc');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [gridSize, setGridSize] = useState<GridSize>(() => {
+    try {
+      const saved = localStorage.getItem('steam_game_manager_grid_size') as GridSize;
+      if (saved === 'compact' || saved === 'medium' || saved === 'large') {
+        return saved;
+      }
+    } catch {}
+    return 'medium';
+  });
+
+  const handleGridSizeChange = (size: GridSize) => {
+    setGridSize(size);
+    try {
+      localStorage.setItem('steam_game_manager_grid_size', size);
+    } catch {}
+  };
 
   // Modal State
   const [selectedGame, setSelectedGame] = useState<SteamGame | null>(null);
@@ -210,11 +228,6 @@ export function App() {
 
   // Automatically resolve titles and artwork for any uninstalled games showing as "Steam Game #..."
   useEffect(() => {
-    const unknownGames = games.filter(
-      (g) => g.name.startsWith('Steam Game #') && !attemptedAppids.current.has(g.appid)
-    );
-    if (unknownGames.length === 0) return;
-
     // 1. Check local cache first for instant synchronous resolution
     let cache: Record<number, { name: string; header_image?: string }> = {};
     try {
@@ -223,66 +236,72 @@ export function App() {
     } catch {}
 
     let hasCachedUpdates = false;
-    const remainingToFetch: number[] = [];
-
-    const immediateUpdated = games.map((g) => {
-      const cached = cache[g.appid];
-      if (cached && g.name.startsWith('Steam Game #')) {
-        hasCachedUpdates = true;
-        return {
-          ...g,
-          name: cached.name,
-          header_image: cached.header_image || g.header_image,
-        };
-      }
-      if (g.name.startsWith('Steam Game #') && !attemptedAppids.current.has(g.appid)) {
-        remainingToFetch.push(g.appid);
-        attemptedAppids.current.add(g.appid);
+    const resolvedFromCache = games.map((g) => {
+      if (g.name.startsWith('Steam Game #')) {
+        const cached = cache[g.appid];
+        if (cached) {
+          hasCachedUpdates = true;
+          return {
+            ...g,
+            name: cached.name,
+            header_image: cached.header_image || g.header_image,
+          };
+        }
       }
       return g;
     });
 
     if (hasCachedUpdates) {
-      setGames(immediateUpdated);
+      setGames(resolvedFromCache);
+      return;
     }
 
-    // 2. Fetch remaining unknown games in background via Tauri backend
-    if (remainingToFetch.length > 0) {
-      invoke<Array<{ appid: number; name: string; header_image?: string }>>(
-        'resolve_steam_apps_metadata',
-        { appids: remainingToFetch.slice(0, 25) }
-      )
-        .then((resolvedList) => {
-          if (resolvedList && resolvedList.length > 0) {
-            const newCache = { ...cache };
-            const resolvedMap = new Map<number, { name: string; header_image?: string }>();
-            for (const item of resolvedList) {
-              newCache[item.appid] = { name: item.name, header_image: item.header_image };
-              resolvedMap.set(item.appid, item);
-            }
-            try {
-              localStorage.setItem('steam_app_metadata_cache_v1', JSON.stringify(newCache));
-            } catch {}
+    // 2. Find unknown games that haven't been attempted yet
+    const unknownGames = games.filter(
+      (g) => g.name.startsWith('Steam Game #') && !attemptedAppids.current.has(g.appid)
+    );
+    if (unknownGames.length === 0) return;
 
-            setGames((prev) =>
-              prev.map((g) => {
-                const resolved = resolvedMap.get(g.appid);
-                if (resolved) {
-                  return {
-                    ...g,
-                    name: resolved.name,
-                    header_image: resolved.header_image || g.header_image,
-                  };
-                }
-                return g;
-              })
-            );
+    // Pick a manageable batch of up to 10 unknown games to fetch in the background
+    const batch = unknownGames.slice(0, 10);
+    for (const g of batch) {
+      attemptedAppids.current.add(g.appid);
+    }
+
+    invoke<Array<{ appid: number; name: string; header_image?: string }>>(
+      'resolve_steam_apps_metadata',
+      { appids: batch.map((g) => g.appid) }
+    )
+      .then((resolvedList) => {
+        if (resolvedList && resolvedList.length > 0) {
+          const newCache = { ...cache };
+          const resolvedMap = new Map<number, { name: string; header_image?: string }>();
+          for (const item of resolvedList) {
+            newCache[item.appid] = { name: item.name, header_image: item.header_image };
+            resolvedMap.set(item.appid, item);
           }
-        })
-        .catch((err) => {
-          console.warn('Could not resolve uninstalled app metadata:', err);
-        });
-    }
+          try {
+            localStorage.setItem('steam_app_metadata_cache_v1', JSON.stringify(newCache));
+          } catch {}
+
+          setGames((prev) =>
+            prev.map((g) => {
+              const resolved = resolvedMap.get(g.appid);
+              if (resolved) {
+                return {
+                  ...g,
+                  name: resolved.name,
+                  header_image: resolved.header_image || g.header_image,
+                };
+              }
+              return g;
+            })
+          );
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not resolve uninstalled app metadata:', err);
+      });
   }, [games]);
 
   // Filtered and Sorted Games
@@ -345,15 +364,15 @@ export function App() {
   }, [games, hiddenGameIds]);
 
   const uninstalledCount = useMemo(() => {
-    return games.filter((g) => !g.is_installed).length;
-  }, [games]);
+    return games.filter((g) => !g.is_installed && (showHidden || !hiddenGameIds.has(g.appid))).length;
+  }, [games, hiddenGameIds, showHidden]);
 
   const installedCount = useMemo(() => {
     return games.filter((g) => g.is_installed).length;
   }, [games]);
 
   return (
-    <Box minH="100vh" bg="bg" color="fg" display="flex" flexDirection="column">
+    <Box minH="100vh" bg="bg" color="fg" display="flex" flexDirection="column" colorPalette={palette}>
       {/* Discord / Spotify Custom TitleBar */}
       <TitleBar />
 
@@ -379,6 +398,8 @@ export function App() {
           onSortChange={setSortBy}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          gridSize={gridSize}
+          onGridSizeChange={handleGridSizeChange}
           filteredCount={filteredGames.length}
           totalCount={showUninstalled ? games.length : installedCount}
           showHidden={showHidden}
@@ -395,7 +416,7 @@ export function App() {
       <Box flex="1" px={{ base: 4, md: 8 }} py={6}>
         {isScanning ? (
           <Flex justify="center" align="center" direction="column" minH="350px" gap={3}>
-            <Spinner size="xl" color="blue.500" />
+            <Spinner size="xl" color={colorHex} />
             <Text fontSize="md" fontWeight="medium">
               Scanning drives for Steam games and manifests...
             </Text>
@@ -432,7 +453,7 @@ export function App() {
             <HStack gap={3}>
               <Button
                 size="md"
-                colorPalette="blue"
+                colorPalette={palette}
                 variant="solid"
                 onClick={() => scanLibraries()}
               >
@@ -486,14 +507,14 @@ export function App() {
           </Flex>
         ) : viewMode === 'grid' ? (
           <Grid
-            templateColumns={{
-              base: 'repeat(2, 1fr)',
-              sm: 'repeat(3, 1fr)',
-              md: 'repeat(4, 1fr)',
-              lg: 'repeat(5, 1fr)',
-              xl: 'repeat(6, 1fr)',
-            }}
-            gap={5}
+            templateColumns={
+              gridSize === 'compact'
+                ? 'repeat(auto-fill, minmax(170px, 1fr))'
+                : gridSize === 'large'
+                  ? 'repeat(auto-fill, minmax(285px, 1fr))'
+                  : 'repeat(auto-fill, minmax(215px, 1fr))'
+            }
+            gap={gridSize === 'compact' ? 3.5 : gridSize === 'large' ? 6 : 5}
           >
             {filteredGames.map((game) => (
               <GameCard
@@ -552,6 +573,8 @@ export function App() {
         onAddCustomPath={handleAddCustomPath}
         onRemoveCustomPath={handleRemoveCustomPath}
         onRescan={() => scanLibraries()}
+        gridSize={gridSize}
+        onGridSizeChange={handleGridSizeChange}
       />
 
       {/* Folder Browser Modal */}

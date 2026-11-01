@@ -7,15 +7,17 @@ export function isGameVisible(
   const isHidden = hiddenGameIds.has(game.appid);
   const isUninstalled = !game.is_installed;
 
-  if (isUninstalled && isHidden) {
-    return showUninstalled || showHidden;
+  // Hidden games never show unless "showHidden" is explicitly turned on,
+  // including when browsing uninstalled games.
+  if (isHidden && !showHidden) {
+    return false;
   }
-  if (isUninstalled) {
-    return showUninstalled;
+
+  // Uninstalled games never show unless "showUninstalled" is explicitly turned on.
+  if (isUninstalled && !showUninstalled) {
+    return false;
   }
-  if (isHidden) {
-    return showHidden;
-  }
+
   return true;
 }
 

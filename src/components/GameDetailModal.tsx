@@ -44,7 +44,9 @@ import { copyToClipboard, formatBytes, formatDate } from '@/utils/format';
 import { invoke } from '@tauri-apps/api/core';
 import { VersionBrowser } from './VersionBrowser';
 import { VaultBrowser } from './VaultBrowser';
-import { getDepotLabel } from '@/utils/knownVersions';
+import { getDepotLabel, useGameManifestStats } from '@/utils/knownVersions';
+import { AppSelect } from '@/components/ui/AppSelect';
+import { useAppAccent } from '@/utils/theme';
 
 interface GameDetailModalProps {
   game: SteamGame | null;
@@ -71,6 +73,8 @@ export function GameDetailModal({
 }: GameDetailModalProps) {
   if (!game) return null;
 
+  const { palette, colorHex } = useAppAccent();
+  const { depotCount, manifestCount } = useGameManifestStats(game);
   const depotKeys = Object.keys(game.mounted_depots);
   const defaultDepot = depotKeys.length > 0 ? depotKeys[0] : String(game.appid);
 
@@ -430,7 +434,7 @@ export function GameDetailModal({
           >
             <Box>
               <HStack gap={2} mb={1}>
-                <Badge colorPalette="blue" variant="solid" size="sm">
+                <Badge colorPalette={palette} variant="solid" size="sm">
                   AppID: {game.appid}
                 </Badge>
                 {!game.is_installed ? (
@@ -446,6 +450,16 @@ export function GameDetailModal({
                   <Badge colorPalette="gray" variant="subtle" size="sm">
                     {formatBytes(game.size_on_disk)}
                   </Badge>
+                )}
+                {(depotCount > 0 || manifestCount > 0) && (
+                  <>
+                    <Badge colorPalette="cyan" variant="subtle" size="sm">
+                      {depotCount} {depotCount === 1 ? 'Depot' : 'Depots'}
+                    </Badge>
+                    <Badge colorPalette="teal" variant="subtle" size="sm">
+                      {manifestCount} {manifestCount === 1 ? 'Manifest' : 'Manifests'}
+                    </Badge>
+                  </>
                 )}
                 {isHidden && (
                   <Badge colorPalette="orange" variant="solid" size="sm">
@@ -471,7 +485,7 @@ export function GameDetailModal({
               <Button
                 size="sm"
                 variant="subtle"
-                colorPalette="blue"
+                colorPalette={palette}
                 asChild
               >
                 <a
@@ -555,7 +569,7 @@ export function GameDetailModal({
                 fontSize="sm"
               >
                 <LuInfo />
-                Files & Depots
+                Files & Depots ({depotKeys.length})
               </Tabs.Trigger>
             </Tabs.List>
 
@@ -593,26 +607,16 @@ export function GameDetailModal({
                           <Text fontSize="xs" fontWeight="semibold" whiteSpace="nowrap">
                             Destination Drive:
                           </Text>
-                          <select
+                          <AppSelect
                             value={targetLibrary}
-                            onChange={(e) => setTargetLibrary(e.target.value)}
-                            style={{
-                              height: '32px',
-                              fontSize: '12px',
-                              borderRadius: '8px',
-                              padding: '0 8px',
-                              background: 'var(--chakra-colors-bg-panel)',
-                              color: 'var(--chakra-colors-fg)',
-                              border: '1px solid var(--chakra-colors-border-subtle)',
-                              outline: 'none',
-                            }}
-                          >
-                            {libraries.map((lib) => (
-                              <option key={lib.path} value={lib.path}>
-                                {lib.label}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => setTargetLibrary(val)}
+                            options={libraries.map((lib) => ({
+                              value: lib.path,
+                              label: lib.label,
+                            }))}
+                            size="sm"
+                            minWidth="140px"
+                          />
                         </HStack>
                       )}
                     </Flex>
@@ -637,12 +641,12 @@ export function GameDetailModal({
                   p={5}
                   rounded="xl"
                   borderWidth="1px"
-                  borderColor={manifestId ? 'blue.500' : 'border.subtle'}
+                  borderColor={manifestId ? colorHex : 'border.subtle'}
                   bg="bg.panel"
                 >
                   <Flex justify="space-between" align="center" mb={2}>
                     <HStack gap={2}>
-                      <Badge colorPalette="blue" size="md">
+                      <Badge colorPalette={palette} size="md">
                         Step 2
                       </Badge>
                       <Heading size="sm">
@@ -676,7 +680,7 @@ export function GameDetailModal({
                           rel="noopener noreferrer"
                           style={{
                             fontSize: '11px',
-                            color: 'var(--chakra-colors-blue-500)',
+                            color: colorHex,
                             display: 'flex',
                             alignItems: 'center',
                             gap: '4px',
@@ -722,7 +726,7 @@ export function GameDetailModal({
                     >
                       <Flex justify="space-between" align="center" mb={2}>
                         <HStack gap={2}>
-                          <Badge colorPalette="blue" variant="solid" size="xs">
+                          <Badge colorPalette={palette} variant="solid" size="xs">
                             Method 1
                           </Badge>
                           <Text fontSize="xs" fontWeight="bold">
@@ -731,7 +735,7 @@ export function GameDetailModal({
                         </HStack>
                         <Button
                           size="2xs"
-                          colorPalette="blue"
+                          colorPalette={palette}
                           variant="outline"
                           onClick={handleOpenSteamConsole}
                         >
@@ -782,7 +786,7 @@ export function GameDetailModal({
                         )}
                         <Button
                           size="sm"
-                          colorPalette="blue"
+                          colorPalette={palette}
                           variant="subtle"
                           onClick={() => setCurrentTab('vault')}
                         >
@@ -901,7 +905,7 @@ export function GameDetailModal({
                     <Button
                       size="sm"
                       variant={backupType === 'saves' ? 'solid' : 'outline'}
-                      colorPalette={backupType === 'saves' ? 'blue' : 'gray'}
+                      colorPalette={backupType === 'saves' ? palette : 'gray'}
                       onClick={() => setBackupType('saves')}
                     >
                       Save Data & Configs (Recommended)
@@ -909,7 +913,7 @@ export function GameDetailModal({
                     <Button
                       size="sm"
                       variant={backupType === 'full' ? 'solid' : 'outline'}
-                      colorPalette={backupType === 'full' ? 'blue' : 'gray'}
+                      colorPalette={backupType === 'full' ? palette : 'gray'}
                       onClick={() => setBackupType('full')}
                     >
                       Full Game Directory Snapshot
@@ -917,7 +921,7 @@ export function GameDetailModal({
                     <Button
                       size="sm"
                       variant={backupType === 'custom' ? 'solid' : 'outline'}
-                      colorPalette={backupType === 'custom' ? 'blue' : 'gray'}
+                      colorPalette={backupType === 'custom' ? palette : 'gray'}
                       onClick={() => setBackupType('custom')}
                     >
                       Custom Path
@@ -938,7 +942,7 @@ export function GameDetailModal({
                   <Flex justify="flex-end">
                     <Button
                       size="sm"
-                      colorPalette="blue"
+                      colorPalette={palette}
                       loading={isBackingUp}
                       onClick={handleCreateBackup}
                     >
@@ -1132,7 +1136,7 @@ export function GameDetailModal({
                   bg="bg.panel"
                 >
                   <Heading size="sm" mb={3}>
-                    Detected Depots & Installed Manifests
+                    Detected Depots ({depotCount}) & Available Manifests ({manifestCount})
                   </Heading>
 
                   <VStack gap={2} align="stretch">
@@ -1149,7 +1153,7 @@ export function GameDetailModal({
                         gap={3}
                       >
                         <HStack gap={3} minW={0} flex="1" wrap="wrap">
-                          <Badge colorPalette="blue" size="xs" flexShrink={0}>
+                          <Badge colorPalette={palette} size="xs" flexShrink={0}>
                             Depot {depotId}
                           </Badge>
                           <Text fontSize="xs" fontWeight="medium" truncate>
@@ -1167,7 +1171,7 @@ export function GameDetailModal({
                             rel="noopener noreferrer"
                             style={{
                               fontSize: '11px',
-                              color: 'var(--chakra-colors-blue-500)',
+                              color: colorHex,
                               display: 'flex',
                               alignItems: 'center',
                               gap: '4px',

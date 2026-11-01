@@ -1,4 +1,5 @@
-import { BuildVersion, SteamPatchNote } from '@/types';
+import { useEffect, useState } from 'react';
+import { BuildVersion, SteamGame, SteamPatchNote } from '@/types';
 
 // Friendly descriptions for well-known game depots
 export const KNOWN_DEPOT_NAMES: Record<string, string> = {
@@ -415,6 +416,7 @@ const STORAGE_KEY = 'steam_downgrader_custom_versions';
 
 export function getSavedCustomVersions(appid: number, depotId: string): BuildVersion[] {
   try {
+    if (typeof localStorage === 'undefined') return [];
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const all = JSON.parse(raw);
@@ -427,6 +429,7 @@ export function getSavedCustomVersions(appid: number, depotId: string): BuildVer
 
 export function saveCustomVersion(appid: number, depotId: string, version: BuildVersion): void {
   try {
+    if (typeof localStorage === 'undefined') return;
     const raw = localStorage.getItem(STORAGE_KEY);
     const all = raw ? JSON.parse(raw) : {};
     const key = `${appid}_${depotId}`;
@@ -436,6 +439,9 @@ export function saveCustomVersion(appid: number, depotId: string, version: Build
     filtered.unshift(version);
     all[key] = filtered;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('steam_manifests_updated', { detail: { appid, depotId } }));
+    }
   } catch (err) {
     console.error('Failed to save custom version:', err);
   }
@@ -443,6 +449,7 @@ export function saveCustomVersion(appid: number, depotId: string, version: Build
 
 export function deleteCustomVersion(appid: number, depotId: string, versionId: string): void {
   try {
+    if (typeof localStorage === 'undefined') return;
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const all = JSON.parse(raw);
@@ -450,6 +457,9 @@ export function deleteCustomVersion(appid: number, depotId: string, versionId: s
     if (all[key]) {
       all[key] = (all[key] as BuildVersion[]).filter((v) => v.id !== versionId);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('steam_manifests_updated', { detail: { appid, depotId } }));
+      }
     }
   } catch (err) {
     console.error('Failed to delete custom version:', err);
@@ -462,6 +472,7 @@ export function saveMultipleCustomVersions(
   versions: BuildVersion[]
 ): number {
   try {
+    if (typeof localStorage === 'undefined') return 0;
     const raw = localStorage.getItem(STORAGE_KEY);
     const all = raw ? JSON.parse(raw) : {};
     const key = `${appid}_${depotId}`;
@@ -478,6 +489,9 @@ export function saveMultipleCustomVersions(
 
     all[key] = list;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('steam_manifests_updated', { detail: { appid, depotId } }));
+    }
     return addedCount;
   } catch (err) {
     console.error('Failed to save multiple custom versions:', err);
@@ -487,6 +501,7 @@ export function saveMultipleCustomVersions(
 
 export function clearCustomVersions(appid: number, depotId: string): void {
   try {
+    if (typeof localStorage === 'undefined') return;
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const all = JSON.parse(raw);
@@ -494,10 +509,112 @@ export function clearCustomVersions(appid: number, depotId: string): void {
     if (all[key]) {
       delete all[key];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('steam_manifests_updated', { detail: { appid, depotId } }));
+      }
     }
   } catch (err) {
     console.error('Failed to clear custom versions:', err);
   }
+}
+
+export interface GameManifestStats {
+  depotCount: number;
+  manifestCount: number;
+}
+
+/**
+ * Aggregates all known manifests and depots for a game across:
+ * 1. Currently installed mounted depots (from appmanifest)
+ * 2. Pre-configured canonical versions
+ * 3. User-added / synced versions in localStorage (SteamDB paste, local depotcache sync, etc.)
+ */
+export function getGameManifestStats(game: SteamGame): GameManifestStats {
+  const depots = new Set<string>();
+  const uniqueManifests = new Set<string>();
+
+  // 1. Mounted / currently installed depots and manifests
+  if (game.mounted_depots) {
+    for (const [depotId, manifestId] of Object.entries(game.mounted_depots)) {
+      if (depotId) {
+        depots.add(depotId);
+      }
+      if (manifestId && manifestId.trim().length > 0) {
+        uniqueManifests.add(`${depotId}:${manifestId.trim()}`);
+      }
+    }
+  }
+
+  const prefix = `${game.appid}_`;
+
+  // 2. Canonical preset versions
+  for (const [key, versions] of Object.entries(PRESET_VERSIONS)) {
+    if (key.startsWith(prefix)) {
+      const depotId = key.slice(prefix.length);
+      if (depotId) depots.add(depotId);
+      for (const v of versions) {
+        if (v.manifestId && v.manifestId.trim().length > 0) {
+          uniqueManifests.add(`${depotId}:${v.manifestId.trim()}`);
+        }
+      }
+    }
+  }
+
+  // 3. Custom / imported versions (SteamDB, local depotcache sync, manual entries)
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const all: Record<string, BuildVersion[]> = JSON.parse(raw);
+        for (const [key, versions] of Object.entries(all)) {
+          if (key.startsWith(prefix) && Array.isArray(versions)) {
+            const depotId = key.slice(prefix.length);
+            if (depotId) depots.add(depotId);
+            for (const v of versions) {
+              if (v.manifestId && v.manifestId.trim().length > 0) {
+                uniqueManifests.add(`${depotId}:${v.manifestId.trim()}`);
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore JSON or storage errors
+  }
+
+  return {
+    depotCount: depots.size,
+    manifestCount: uniqueManifests.size,
+  };
+}
+
+/**
+ * React hook that reactively updates depot and manifest counts when
+ * new manifests are imported or synced from SteamDB/local cache.
+ */
+export function useGameManifestStats(game: SteamGame): GameManifestStats {
+  const [stats, setStats] = useState<GameManifestStats>(() => getGameManifestStats(game));
+
+  useEffect(() => {
+    setStats(getGameManifestStats(game));
+    const handleUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent<{ appid?: number }>;
+      if (
+        !customEvent.detail ||
+        customEvent.detail.appid === undefined ||
+        customEvent.detail.appid === game.appid
+      ) {
+        setStats(getGameManifestStats(game));
+      }
+    };
+    window.addEventListener('steam_manifests_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('steam_manifests_updated', handleUpdate);
+    };
+  }, [game.appid, game.mounted_depots]);
+
+  return stats;
 }
 
 /**
@@ -609,8 +726,10 @@ export const PATCH_NOTE_LANG_KEY = 'steam_downgrader_patch_notes_lang';
  */
 export function getUserLanguage(): string {
   try {
-    const saved = localStorage.getItem(PATCH_NOTE_LANG_KEY);
-    if (saved) return saved;
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(PATCH_NOTE_LANG_KEY);
+      if (saved) return saved;
+    }
   } catch {
     // ignore
   }
@@ -627,7 +746,9 @@ export function getUserLanguage(): string {
  */
 export function setUserLanguage(lang: string): void {
   try {
-    localStorage.setItem(PATCH_NOTE_LANG_KEY, lang);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PATCH_NOTE_LANG_KEY, lang);
+    }
   } catch {
     // ignore
   }

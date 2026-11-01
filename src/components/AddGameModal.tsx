@@ -21,6 +21,7 @@ import {
 import { toaster } from '@/components/ui/toaster';
 import { LuGamepad2, LuPlus } from 'react-icons/lu';
 import { SteamGame, SteamLibrary } from '@/types';
+import { useAppAccent } from '@/utils/theme';
 
 interface AddGameModalProps {
   isOpen: boolean;
@@ -50,6 +51,7 @@ export function AddGameModal({
   libraries,
   onAddGame,
 }: AddGameModalProps) {
+  const { palette, colorHex } = useAppAccent();
   const [appidInput, setAppidInput] = useState('');
   const [nameInput, setNameInput] = useState('');
   const [installDirInput, setInstallDirInput] = useState('');
@@ -120,7 +122,7 @@ export function AddGameModal({
       <DialogContent rounded="2xl" p={6}>
         <DialogHeader p={0} mb={4}>
           <HStack gap={2}>
-            <Box color="blue.500">
+            <Box color={colorHex}>
               <LuPlus size={20} />
             </Box>
             <DialogTitle fontSize="lg">Add Game by AppID</DialogTitle>
@@ -143,7 +145,7 @@ export function AddGameModal({
                     key={preset.appid}
                     size="xs"
                     variant={appidInput === String(preset.appid) ? 'solid' : 'subtle'}
-                    colorPalette={appidInput === String(preset.appid) ? 'blue' : 'gray'}
+                    colorPalette={appidInput === String(preset.appid) ? palette : 'gray'}
                     justifyContent="flex-start"
                     onClick={() => handleSelectPreset(preset)}
                     truncate
@@ -165,7 +167,7 @@ export function AddGameModal({
                     Steam AppID *
                   </Text>
                   {appidInput && (
-                    <Badge size="xs" colorPalette="blue">
+                    <Badge size="xs" colorPalette={palette}>
                       AppID: {appidInput}
                     </Badge>
                   )}
@@ -217,7 +219,7 @@ export function AddGameModal({
               </Button>
               <Button
                 size="sm"
-                colorPalette="blue"
+                colorPalette={palette}
                 disabled={!appidInput.trim()}
                 onClick={handleAdd}
               >

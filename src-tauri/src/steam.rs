@@ -53,6 +53,12 @@ pub struct SteamAppMetadata {
     pub header_image: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AppInfoEntry {
+    pub name: String,
+    pub app_type: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildVersion {
@@ -192,9 +198,31 @@ impl SteamManager {
 
     /// Resolves official Steam store title and dynamic header artwork for an AppID
     pub fn resolve_steam_app_metadata(appid: u32) -> Option<SteamAppMetadata> {
+        // 1. Check local appinfo.vdf cache first if Steam is installed
+        if let Some(sp) = Self::find_active_steam_path() {
+            let local_info = Self::read_local_appinfo(&sp);
+            if let Some(entry) = local_info.get(&appid) {
+                return Some(SteamAppMetadata {
+                    appid,
+                    name: entry.name.clone(),
+                    header_image: Some(format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg")),
+                });
+            }
+        }
+
+        // 2. Query Steam store API with fast timeout
         let url = format!("https://store.steampowered.com/api/appdetails?appids={appid}&filters=basic");
         let output = std::process::Command::new("curl")
-            .args(["-s", "--connect-timeout", "4", &url])
+            .args([
+                "-s",
+                "--connect-timeout",
+                "2",
+                "-m",
+                "4",
+                "-A",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                &url,
+            ])
             .output()
             .ok()?;
 
@@ -218,14 +246,62 @@ impl SteamManager {
         None
     }
 
-    /// Resolves metadata for multiple Steam AppIDs
+    /// Resolves metadata for multiple Steam AppIDs concurrently without blocking the main event loop
     pub fn resolve_multiple_steam_apps(appids: Vec<u32>) -> Vec<SteamAppMetadata> {
         let mut results = Vec::new();
-        for appid in appids {
-            if let Some(meta) = Self::resolve_steam_app_metadata(appid) {
-                results.push(meta);
+        let mut remaining = Vec::new();
+
+        // 1. Resolve immediately from local appinfo.vdf cache (instant offline)
+        if let Some(sp) = Self::find_active_steam_path() {
+            let local_info = Self::read_local_appinfo(&sp);
+            for appid in appids {
+                if let Some(entry) = local_info.get(&appid) {
+                    results.push(SteamAppMetadata {
+                        appid,
+                        name: entry.name.clone(),
+                        header_image: Some(format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg")),
+                    });
+                } else {
+                    remaining.push(appid);
+                }
             }
+        } else {
+            remaining = appids;
         }
+
+        // 2. Fetch any remaining unknown apps concurrently in background threads
+        if !remaining.is_empty() {
+            use std::sync::{Arc, Mutex};
+            use std::thread;
+
+            let shared_results = Arc::new(Mutex::new(results));
+            let mut handles = Vec::new();
+
+            for chunk in remaining.chunks(4) {
+                let chunk_vec = chunk.to_vec();
+                let res_ref = Arc::clone(&shared_results);
+                let handle = thread::spawn(move || {
+                    for aid in chunk_vec {
+                        if let Some(meta) = Self::resolve_steam_app_metadata(aid) {
+                            if let Ok(mut lock) = res_ref.lock() {
+                                lock.push(meta);
+                            }
+                        }
+                    }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                let _ = handle.join();
+            }
+
+            if let Ok(lock) = shared_results.lock() {
+                return lock.clone();
+            }
+            return Vec::new();
+        }
+
         results
     }
 
@@ -507,7 +583,49 @@ impl SteamManager {
         format!("Drive {folder}{custom_tag}")
     }
 
-    /// Finds potential Steam roots and library paths across all drives
+    /// Fast-path primary Steam paths checked first (< 1ms)
+    pub fn get_primary_steam_paths() -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(prog_files) = std::env::var("ProgramFiles(x86)") {
+                paths.push(PathBuf::from(prog_files).join("Steam"));
+            }
+            if let Ok(prog_files) = std::env::var("ProgramFiles") {
+                paths.push(PathBuf::from(prog_files).join("Steam"));
+            }
+            paths.push(PathBuf::from("C:\\Program Files (x86)\\Steam"));
+            paths.push(PathBuf::from("C:\\Program Files\\Steam"));
+            paths.push(PathBuf::from("C:\\Steam"));
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(home) = std::env::var("HOME") {
+                let home_path = PathBuf::from(home);
+                paths.push(home_path.join(".steam/steam"));
+                paths.push(home_path.join(".local/share/Steam"));
+                paths.push(home_path.join(".steam/root"));
+                paths.push(home_path.join(".var/app/com.valvesoftware.Steam/data/Steam"));
+            }
+            // WSL fast path
+            paths.push(PathBuf::from("/mnt/c/Program Files (x86)/Steam"));
+            paths.push(PathBuf::from("/mnt/c/Program Files/Steam"));
+            paths.push(PathBuf::from("/mnt/c/Steam"));
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(home) = std::env::var("HOME") {
+                paths.push(PathBuf::from(home).join("Library/Application Support/Steam"));
+            }
+        }
+
+        paths
+    }
+
+    /// Finds potential Steam roots and library paths across all drives (fallback search)
     pub fn get_candidate_paths() -> Vec<PathBuf> {
         let mut candidates = Vec::new();
 
@@ -612,14 +730,213 @@ impl SteamManager {
         candidates
     }
 
-    /// Finds the active main Steam installation path
+    /// Finds the active main Steam installation path (checks primary paths first)
     pub fn find_active_steam_path() -> Option<PathBuf> {
+        // 1. Try fast primary paths first (< 1ms)
+        for path in Self::get_primary_steam_paths() {
+            if path.exists() && (path.join("steamapps").exists() || path.join("config").exists()) {
+                return Some(path);
+            }
+        }
+
+        // 2. Fall back to deep candidate search across drives only if primary missed
         for path in Self::get_candidate_paths() {
             if path.exists() && (path.join("steamapps").exists() || path.join("config").exists()) {
                 return Some(path);
             }
         }
         None
+    }
+
+    fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        if needle.is_empty() || needle.len() > haystack.len() {
+            return None;
+        }
+        haystack.windows(needle.len()).position(|window| window == needle)
+    }
+
+    /// Parses Steam's local binary appcache/appinfo.vdf to resolve game names offline in < 15ms
+    pub fn parse_appinfo_data(data: &[u8]) -> HashMap<u32, AppInfoEntry> {
+        let mut map = HashMap::new();
+        if data.len() < 16 {
+            return map;
+        }
+
+        let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        if magic != 0x07564427 && magic != 0x07564428 && magic != 0x07564429 {
+            return map;
+        }
+
+        if magic >= 0x07564428 {
+            let st_offset = u64::from_le_bytes([
+                data[8], data[9], data[10], data[11],
+                data[12], data[13], data[14], data[15],
+            ]) as usize;
+
+            if st_offset >= data.len() || st_offset < 16 {
+                return map;
+            }
+
+            let st_slice = &data[st_offset..];
+            if st_slice.len() < 4 {
+                return map;
+            }
+            let num_strings = u32::from_le_bytes([st_slice[0], st_slice[1], st_slice[2], st_slice[3]]) as usize;
+
+            let mut name_idx: Option<u32> = None;
+            let mut type_idx: Option<u32> = None;
+            let mut spos = 4;
+
+            for i in 0..num_strings {
+                if spos >= st_slice.len() {
+                    break;
+                }
+                if let Some(null_rel) = st_slice[spos..].iter().position(|&b| b == 0) {
+                    let null_pos = spos + null_rel;
+                    if let Ok(s) = std::str::from_utf8(&st_slice[spos..null_pos]) {
+                        if s == "name" && name_idx.is_none() {
+                            name_idx = Some(i as u32);
+                        } else if s == "type" && type_idx.is_none() {
+                            type_idx = Some(i as u32);
+                        }
+                    }
+                    spos = null_pos + 1;
+                } else {
+                    break;
+                }
+                if name_idx.is_some() && type_idx.is_some() {
+                    break;
+                }
+            }
+
+            let name_pattern = name_idx.map(|idx| {
+                let mut p = Vec::with_capacity(5);
+                p.push(1u8);
+                p.extend_from_slice(&idx.to_le_bytes());
+                p
+            });
+
+            let type_pattern = type_idx.map(|idx| {
+                let mut p = Vec::with_capacity(5);
+                p.push(1u8);
+                p.extend_from_slice(&idx.to_le_bytes());
+                p
+            });
+
+            let mut pos = 16;
+            while pos + 8 < st_offset {
+                let appid = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+                if appid == 0 {
+                    break;
+                }
+                let size = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]]) as usize;
+                let entry_end = (pos + 8 + size).min(st_offset);
+                if pos + 8 >= entry_end {
+                    break;
+                }
+                let app_slice = &data[pos + 8..entry_end];
+
+                let mut app_name: Option<String> = None;
+                let mut app_type: Option<String> = None;
+
+                if let Some(ref np) = name_pattern {
+                    if let Some(idx) = Self::find_subslice(app_slice, np) {
+                        let val_start = idx + np.len();
+                        if let Some(end_rel) = app_slice[val_start..].iter().position(|&b| b == 0) {
+                            let val_end = val_start + end_rel;
+                            if let Ok(s) = std::str::from_utf8(&app_slice[val_start..val_end]) {
+                                if !s.is_empty() {
+                                    app_name = Some(s.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(ref tp) = type_pattern {
+                    if let Some(idx) = Self::find_subslice(app_slice, tp) {
+                        let val_start = idx + tp.len();
+                        if let Some(end_rel) = app_slice[val_start..].iter().position(|&b| b == 0) {
+                            let val_end = val_start + end_rel;
+                            if let Ok(s) = std::str::from_utf8(&app_slice[val_start..val_end]) {
+                                app_type = Some(s.to_string());
+                            }
+                        }
+                    }
+                }
+
+                if let Some(name) = app_name {
+                    map.insert(appid, AppInfoEntry {
+                        name,
+                        app_type: app_type.unwrap_or_else(|| "Game".to_string()),
+                    });
+                }
+
+                pos = pos + 8 + size;
+            }
+        } else {
+            let name_pattern = b"\x01name\x00";
+            let type_pattern = b"\x01type\x00";
+            let mut pos = 8;
+
+            while pos + 8 < data.len() {
+                let appid = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+                if appid == 0 {
+                    break;
+                }
+                let size = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]]) as usize;
+                let entry_end = (pos + 8 + size).min(data.len());
+                if pos + 8 >= entry_end {
+                    break;
+                }
+                let app_slice = &data[pos + 8..entry_end];
+
+                let mut app_name: Option<String> = None;
+                let mut app_type: Option<String> = None;
+
+                if let Some(idx) = Self::find_subslice(app_slice, name_pattern) {
+                    let val_start = idx + name_pattern.len();
+                    if let Some(end_rel) = app_slice[val_start..].iter().position(|&b| b == 0) {
+                        let val_end = val_start + end_rel;
+                        if let Ok(s) = std::str::from_utf8(&app_slice[val_start..val_end]) {
+                            if !s.is_empty() {
+                                app_name = Some(s.to_string());
+                            }
+                        }
+                    }
+                }
+
+                if let Some(idx) = Self::find_subslice(app_slice, type_pattern) {
+                    let val_start = idx + type_pattern.len();
+                    if let Some(end_rel) = app_slice[val_start..].iter().position(|&b| b == 0) {
+                        let val_end = val_start + end_rel;
+                        if let Ok(s) = std::str::from_utf8(&app_slice[val_start..val_end]) {
+                            app_type = Some(s.to_string());
+                        }
+                    }
+                }
+
+                if let Some(name) = app_name {
+                    map.insert(appid, AppInfoEntry {
+                        name,
+                        app_type: app_type.unwrap_or_else(|| "Game".to_string()),
+                    });
+                }
+
+                pos = pos + 8 + size;
+            }
+        }
+
+        map
+    }
+
+    /// Reads Steam's local appcache/appinfo.vdf
+    pub fn read_local_appinfo(steam_path: &Path) -> HashMap<u32, AppInfoEntry> {
+        let appinfo_path = steam_path.join("appcache").join("appinfo.vdf");
+        if let Ok(data) = fs::read(&appinfo_path) {
+            return Self::parse_appinfo_data(&data);
+        }
+        HashMap::new()
     }
 
     /// Parses libraryfolders.vdf and returns all library folders with their VDF labels
@@ -842,18 +1159,19 @@ impl SteamManager {
             }
         }
 
-        // 3. Directly check all candidate drives for existing SteamLibrary folders
-        for candidate in Self::get_candidate_paths() {
-            if candidate.exists() && (candidate.join("steamapps").exists() || candidate.ends_with("steamapps")) {
-                if !library_paths_with_labels.iter().any(|(p, _)| p == &candidate) {
-                    // Check if this candidate has its own libraryfolders.vdf
-                    let sub_libs = Self::get_library_folders(&candidate);
-                    if sub_libs.is_empty() {
-                        library_paths_with_labels.push((candidate, None));
-                    } else {
-                        for (sub, label) in sub_libs {
-                            if !library_paths_with_labels.iter().any(|(p, _)| p == &sub) {
-                                library_paths_with_labels.push((sub, label));
+        // 3. Fallback: Only probe all candidate drives across the system if no libraries were found
+        if library_paths_with_labels.is_empty() {
+            for candidate in Self::get_candidate_paths() {
+                if candidate.exists() && (candidate.join("steamapps").exists() || candidate.ends_with("steamapps")) {
+                    if !library_paths_with_labels.iter().any(|(p, _)| p == &candidate) {
+                        let sub_libs = Self::get_library_folders(&candidate);
+                        if sub_libs.is_empty() {
+                            library_paths_with_labels.push((candidate, None));
+                        } else {
+                            for (sub, label) in sub_libs {
+                                if !library_paths_with_labels.iter().any(|(p, _)| p == &sub) {
+                                    library_paths_with_labels.push((sub, label));
+                                }
                             }
                         }
                     }
@@ -1101,15 +1419,48 @@ impl SteamManager {
     }
 
     /// Extracts AppIDs from a VDF config file (like localconfig.vdf or sharedconfig.vdf)
+    /// Scoped strictly to the "apps" block to avoid picking up friend IDs, timestamps, or system settings
     fn extract_appids_from_vdf_file(vdf_path: &Path, seen: &mut std::collections::HashSet<u32>) {
         if let Ok(content) = fs::read_to_string(vdf_path) {
+            let mut depth: i32 = 0;
+            let mut apps_depth: Option<i32> = None;
+
             for line in content.lines() {
                 let trimmed = line.trim();
-                if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 3 && trimmed.len() <= 12 {
-                    let candidate = &trimmed[1..trimmed.len() - 1];
-                    if let Ok(appid) = candidate.parse::<u32>() {
-                        if appid > 100 && appid != 228980 && appid != 250820 && appid != 1391110 {
-                            seen.insert(appid);
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                if trimmed.starts_with('{') {
+                    depth += 1;
+                    continue;
+                } else if trimmed.starts_with('}') {
+                    if let Some(ad) = apps_depth {
+                        if depth <= ad {
+                            apps_depth = None;
+                        }
+                    }
+                    depth = depth.saturating_sub(1);
+                    continue;
+                }
+
+                // Check for apps section header, e.g. "apps" or "Apps"
+                if trimmed.eq_ignore_ascii_case("\"apps\"") || trimmed.eq_ignore_ascii_case("apps") {
+                    apps_depth = Some(depth + 1);
+                    continue;
+                }
+
+                // Only extract keys that are direct children of the apps block
+                if let Some(ad) = apps_depth {
+                    if depth == ad && trimmed.starts_with('"') {
+                        if let Some(end_quote) = trimmed[1..].find('"') {
+                            let key = &trimmed[1..1 + end_quote];
+                            if let Ok(appid) = key.parse::<u32>() {
+                                // Exclude base redistributables and invalid IDs
+                                if appid > 100 && appid != 228980 && appid != 250820 && appid != 1391110 {
+                                    seen.insert(appid);
+                                }
+                            }
                         }
                     }
                 }
@@ -1125,6 +1476,12 @@ impl SteamManager {
     ) -> Vec<SteamGame> {
         let mut uninstalled = Vec::new();
         let mut seen_appids = std::collections::HashSet::new();
+
+        // 1. Read local appcache/appinfo.vdf for instant offline name resolution
+        let mut appinfo_map = HashMap::new();
+        if let Some(sp) = steam_path {
+            appinfo_map = Self::read_local_appinfo(sp);
+        }
 
         if let Some(sp) = steam_path {
             let userdata_dir = sp.join("userdata");
@@ -1148,6 +1505,8 @@ impl SteamManager {
         }
 
         let known_games = [
+            (1808500, "ARC Raiders", "ARC Raiders"),
+            (1659040, "HITMAN World of Assassination", "HITMAN 3"),
             (489830, "The Elder Scrolls V: Skyrim Special Edition", "Skyrim Special Edition"),
             (377160, "Fallout 4", "Fallout 4"),
             (1091500, "Cyberpunk 2077", "Cyberpunk 2077"),
@@ -1222,7 +1581,23 @@ impl SteamManager {
 
         for appid in seen_appids {
             if !installed_appids.contains(&appid) && !uninstalled.iter().any(|g: &SteamGame| g.appid == appid) {
-                let name = format!("Steam Game #{appid}");
+                // Check local appinfo cache first for instant title and type filtering
+                let (resolved_name, is_dlc_or_tool) = if let Some(entry) = appinfo_map.get(&appid) {
+                    let is_dlc_or_tool = entry.app_type.eq_ignore_ascii_case("dlc")
+                        || entry.app_type.eq_ignore_ascii_case("tool")
+                        || entry.app_type.eq_ignore_ascii_case("music")
+                        || entry.app_type.eq_ignore_ascii_case("config");
+                    (Some(entry.name.clone()), is_dlc_or_tool)
+                } else {
+                    (None, false)
+                };
+
+                // Skip non-standalone game entities (DLC packs, soundtracks, internal tools)
+                if is_dlc_or_tool {
+                    continue;
+                }
+
+                let name = resolved_name.unwrap_or_else(|| format!("Steam Game #{appid}"));
                 let install_dir = format!("game_{appid}");
                 let cover_image = format!("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/library_600x900.jpg");
                 let header_image = format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg");
@@ -1356,5 +1731,102 @@ mod tests {
         // "all" accepts any
         assert!(SteamManager::matches_language_script(ru_text, "all"));
         assert!(SteamManager::matches_language_script(en_text, "all"));
+    }
+
+    #[test]
+    fn test_extract_appids_scoped_to_apps() {
+        let vdf_content = r#"
+"UserLocalConfigStore"
+{
+	"friends"
+	{
+		"155019067"
+		{
+			"name" "Krispy"
+		}
+	}
+	"Software"
+	{
+		"Valve"
+		{
+			"Steam"
+			{
+				"apps"
+				{
+					"1808500"
+					{
+						"cloud"
+						{
+							"quota_bytes" "12345678"
+						}
+					}
+					"1659040"
+					{
+						"cloud"
+						{
+							"quota_bytes" "87654321"
+						}
+					}
+				}
+			}
+		}
+	}
+}
+"#;
+        let temp_dir = std::env::temp_dir().join("test_vdf_extract");
+        let _ = fs::create_dir_all(&temp_dir);
+        let file_path = temp_dir.join("localconfig.vdf");
+        fs::write(&file_path, vdf_content).unwrap();
+
+        let mut seen = std::collections::HashSet::new();
+        SteamManager::extract_appids_from_vdf_file(&file_path, &mut seen);
+
+        assert!(seen.contains(&1808500));
+        assert!(seen.contains(&1659040));
+        // Must NOT contain friend ID 155019067 or quota_bytes
+        assert!(!seen.contains(&155019067));
+        assert!(!seen.contains(&12345678));
+        assert!(!seen.contains(&87654321));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_parse_appinfo_data_v29() {
+        // Construct minimal valid v29 binary data
+        let mut data = Vec::new();
+        // Magic 0x07564429
+        data.extend_from_slice(&0x07564429u32.to_le_bytes()); // 0..4
+        // Universe 1
+        data.extend_from_slice(&1u32.to_le_bytes()); // 4..8
+
+        // Placeholder for string table offset at bytes 8..16
+        data.extend_from_slice(&0u64.to_le_bytes()); // 8..16
+
+        // App entry at offset 16:
+        let appid = 1808500u32;
+        data.extend_from_slice(&appid.to_le_bytes()); // pos 16..20
+
+        // App slice: 1 byte type (1) + 4 bytes key_idx (0 for name) + "ARC Raiders\0"
+        let mut slice = Vec::new();
+        slice.push(1u8); // string type
+        slice.extend_from_slice(&0u32.to_le_bytes()); // key index 0 ("name")
+        slice.extend_from_slice(b"ARC Raiders\0");
+
+        let size = slice.len() as u32;
+        data.extend_from_slice(&size.to_le_bytes()); // pos 20..24
+        data.extend_from_slice(&slice); // pos 24..41
+
+        // String table starts here:
+        let st_offset = data.len() as u64;
+        data[8..16].copy_from_slice(&st_offset.to_le_bytes());
+
+        // num_strings: 1
+        data.extend_from_slice(&1u32.to_le_bytes());
+        // string 0: "name\0"
+        data.extend_from_slice(b"name\0");
+
+        let parsed = SteamManager::parse_appinfo_data(&data);
+        assert_eq!(parsed.get(&1808500).map(|e| e.name.as_str()), Some("ARC Raiders"));
     }
 }

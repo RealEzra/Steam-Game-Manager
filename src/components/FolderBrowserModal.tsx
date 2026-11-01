@@ -30,6 +30,7 @@ import {
 import { DirectoryListing } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 import { toaster } from '@/components/ui/toaster';
+import { useAppAccent } from '@/utils/theme';
 
 interface FolderBrowserModalProps {
   isOpen: boolean;
@@ -44,6 +45,7 @@ export function FolderBrowserModal({
   onSelectFolder,
   initialPath,
 }: FolderBrowserModalProps) {
+  const { palette, colorHex } = useAppAccent();
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [customInputPath, setCustomInputPath] = useState('');
@@ -113,7 +115,7 @@ export function FolderBrowserModal({
                         key={d.path}
                         size="2xs"
                         variant={isCurrent ? 'solid' : 'subtle'}
-                        colorPalette={d.is_steam_library ? 'green' : isCurrent ? 'blue' : 'gray'}
+                        colorPalette={d.is_steam_library ? 'green' : isCurrent ? palette : 'gray'}
                         onClick={() => navigateTo(d.path)}
                       >
                         <LuHardDrive />
@@ -175,7 +177,7 @@ export function FolderBrowserModal({
             >
               {isLoading ? (
                 <Flex justify="center" align="center" minH="240px">
-                  <Spinner size="md" color="blue.500" />
+                  <Spinner size="md" color={colorHex} />
                 </Flex>
               ) : !listing || listing.items.length === 0 ? (
                 <Flex justify="center" align="center" minH="240px" direction="column" color="fg.muted">
@@ -200,7 +202,7 @@ export function FolderBrowserModal({
                       transition="all 0.15s ease"
                       onClick={() => navigateTo(item.path)}
                       _hover={{
-                        borderColor: 'blue.500',
+                        borderColor: colorHex,
                         bg: 'bg.muted',
                       }}
                     >
@@ -208,7 +210,7 @@ export function FolderBrowserModal({
                         {item.is_steam_library ? (
                           <LuFolderCheck color="var(--chakra-colors-green-500)" size={18} />
                         ) : (
-                          <LuFolder color="var(--chakra-colors-blue-500)" size={18} />
+                          <LuFolder color={colorHex} size={18} />
                         )}
                         <Text fontSize="xs" fontWeight={item.is_steam_library ? 'bold' : 'normal'} truncate>
                           {item.name}
@@ -223,7 +225,7 @@ export function FolderBrowserModal({
                       <Button
                         size="2xs"
                         variant={item.is_steam_library ? 'solid' : 'subtle'}
-                        colorPalette={item.is_steam_library ? 'green' : 'blue'}
+                        colorPalette={item.is_steam_library ? 'green' : palette}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleSelect(item.path);
@@ -250,7 +252,7 @@ export function FolderBrowserModal({
               </Button>
               <Button
                 size="sm"
-                colorPalette="blue"
+                colorPalette={palette}
                 onClick={() => listing && handleSelect(listing.current_path)}
               >
                 Select Current Folder

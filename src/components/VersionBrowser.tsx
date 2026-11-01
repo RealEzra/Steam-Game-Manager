@@ -45,6 +45,8 @@ import {
 import { formatDate } from '@/utils/format';
 import { invoke } from '@tauri-apps/api/core';
 import { toaster } from '@/components/ui/toaster';
+import { AppSelect } from '@/components/ui/AppSelect';
+import { useAppAccent } from '@/utils/theme';
 
 interface VersionBrowserProps {
   game: SteamGame;
@@ -63,6 +65,7 @@ export function VersionBrowser({
 }: VersionBrowserProps) {
   const depotKeys = Object.keys(game.mounted_depots);
   const currentManifest = game.mounted_depots[activeDepot] || 'unknown';
+  const { palette, colorHex } = useAppAccent();
 
   const [versions, setVersions] = useState<BuildVersion[]>([]);
   const [patchNotes, setPatchNotes] = useState<SteamPatchNote[]>([]);
@@ -414,7 +417,7 @@ export function VersionBrowser({
             <Button
               size="xs"
               variant="outline"
-              colorPalette="blue"
+              colorPalette={palette}
               asChild
             >
               <a
@@ -468,7 +471,7 @@ export function VersionBrowser({
                 key={depotId}
                 size="sm"
                 variant={isSelected ? 'solid' : 'subtle'}
-                colorPalette={isSelected ? 'blue' : 'gray'}
+                colorPalette={isSelected ? palette : 'gray'}
                 onClick={() => onSelectDepot(depotId)}
                 textAlign="left"
               >
@@ -568,7 +571,7 @@ export function VersionBrowser({
             <Button
               size="xs"
               variant="subtle"
-              colorPalette="blue"
+              colorPalette={palette}
               loading={isSyncing}
               onClick={handleSyncOnline}
               title="Search local depotcache on disk, past logs, and Steam network"
@@ -607,7 +610,7 @@ export function VersionBrowser({
             <Button
               size="xs"
               variant="outline"
-              colorPalette="blue"
+              colorPalette={palette}
               onClick={() => setShowAddForm(!showAddForm)}
             >
               <LuPlus />
@@ -699,7 +702,7 @@ export function VersionBrowser({
             rounded="xl"
             bg="bg.muted"
             borderWidth="1px"
-            borderColor="blue.500"
+            borderColor={colorHex}
             mb={4}
           >
             <Heading size="xs" mb={2}>
@@ -711,7 +714,7 @@ export function VersionBrowser({
                 href={steamDbManifestsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ color: 'var(--chakra-colors-blue-500)', textDecoration: 'underline' }}
+                style={{ color: colorHex, textDecoration: 'underline' }}
               >
                 SteamDB for Depot {activeDepot}
               </a>
@@ -772,7 +775,7 @@ export function VersionBrowser({
               <Button size="xs" variant="ghost" onClick={() => setShowAddForm(false)}>
                 Cancel
               </Button>
-              <Button size="xs" colorPalette="blue" onClick={handleSaveCustom}>
+              <Button size="xs" colorPalette={palette} onClick={handleSaveCustom}>
                 Save & Select Version
               </Button>
             </Flex>
@@ -802,36 +805,27 @@ export function VersionBrowser({
                   <LuGlobe size={11} />
                   <span>Language:</span>
                 </HStack>
-                <select
+                <AppSelect
                   value={patchNoteLang}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  onChange={(val) => {
                     setPatchNoteLang(val);
                     setUserLanguage(val);
                   }}
-                  style={{
-                    height: '24px',
-                    fontSize: '11px',
-                    borderRadius: '6px',
-                    padding: '0 6px',
-                    background: 'var(--chakra-colors-bg-muted)',
-                    color: 'var(--chakra-colors-fg)',
-                    border: '1px solid var(--chakra-colors-border-subtle)',
-                    outline: 'none',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <option value="auto">Auto (System)</option>
-                  <option value="en">English</option>
-                  <option value="es">Español</option>
-                  <option value="de">Deutsch</option>
-                  <option value="fr">Français</option>
-                  <option value="ru">Русский</option>
-                  <option value="zh">中文</option>
-                  <option value="ja">日本語</option>
-                  <option value="ko">한국어</option>
-                  <option value="all">All Languages</option>
-                </select>
+                  size="xs"
+                  minWidth="130px"
+                  options={[
+                    { value: 'auto', label: 'Auto (System)' },
+                    { value: 'en', label: 'English' },
+                    { value: 'es', label: 'Español' },
+                    { value: 'de', label: 'Deutsch' },
+                    { value: 'fr', label: 'Français' },
+                    { value: 'ru', label: 'Русский' },
+                    { value: 'zh', label: 'Chinese (中文)' },
+                    { value: 'ja', label: 'Japanese (日本語)' },
+                    { value: 'ko', label: 'Korean (한국어)' },
+                    { value: 'all', label: 'All Languages' },
+                  ]}
+                />
                 <Text fontSize="2xs" color="fg.muted">
                   ({visiblePatchNotes.length} of {patchNotes.length})
                 </Text>
@@ -882,7 +876,7 @@ export function VersionBrowser({
                       <Button
                         size="2xs"
                         variant="subtle"
-                        colorPalette="blue"
+                        colorPalette={palette}
                         onClick={() => handlePrefillFromPatchNote(note)}
                       >
                         <LuPlus size={11} /> Add as Version
@@ -968,14 +962,14 @@ export function VersionBrowser({
                   borderWidth="1px"
                   borderColor={
                     isSelected
-                      ? 'blue.500'
+                      ? colorHex
                       : isCurrent
                       ? 'green.500'
                       : 'border.subtle'
                   }
                   bg={
                     isSelected
-                      ? 'blue.500/10'
+                      ? `${palette}.500/10`
                       : isCurrent
                       ? 'green.500/10'
                       : 'bg.panel'
@@ -987,7 +981,7 @@ export function VersionBrowser({
                   align="center"
                   gap={4}
                   _hover={{
-                    borderColor: 'blue.500',
+                    borderColor: colorHex,
                   }}
                 >
                   <Box minW={0} flex="1">
@@ -1001,7 +995,7 @@ export function VersionBrowser({
                         </Badge>
                       )}
                       {isSelected && !isCurrent && (
-                        <Badge size="xs" colorPalette="blue" variant="solid">
+                        <Badge size="xs" colorPalette={palette} variant="solid">
                           Target Downgrade
                         </Badge>
                       )}
@@ -1077,7 +1071,7 @@ export function VersionBrowser({
                     <Button
                       size="sm"
                       variant={isSelected ? 'solid' : 'subtle'}
-                      colorPalette={isSelected ? 'blue' : 'gray'}
+                      colorPalette={isSelected ? palette : 'gray'}
                       onClick={(e) => {
                         e.stopPropagation();
                         onSelectVersion(ver);

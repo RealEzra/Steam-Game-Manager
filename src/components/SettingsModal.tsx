@@ -25,15 +25,23 @@ import {
   LuFolder,
   LuGlobe,
   LuHardDrive,
+  LuLayoutGrid,
+  LuMoon,
+  LuPalette,
   LuPlus,
   LuRefreshCw,
   LuSparkles,
+  LuSun,
   LuTrash2,
 } from 'react-icons/lu';
 import { FolderBrowserModal } from './FolderBrowserModal';
 import { getUserLanguage, setUserLanguage } from '@/utils/knownVersions';
 import { checkUpdate, downloadAndApplyUpdate, UpdateState } from '@/utils/updater';
 import { formatBytes } from '@/utils/format';
+import { useColorMode } from '@/components/ui/color-mode';
+import { useAppAccent } from '@/utils/theme';
+import { AppSelect } from '@/components/ui/AppSelect';
+import { GridSize } from './FilterBar';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -43,6 +51,8 @@ interface SettingsModalProps {
   onAddCustomPath: (path: string) => void;
   onRemoveCustomPath: (path: string) => void;
   onRescan: () => void;
+  gridSize?: GridSize;
+  onGridSizeChange?: (size: GridSize) => void;
 }
 
 export function SettingsModal({
@@ -53,10 +63,14 @@ export function SettingsModal({
   onAddCustomPath,
   onRemoveCustomPath,
   onRescan,
+  gridSize = 'medium',
+  onGridSizeChange,
 }: SettingsModalProps) {
   const [newPath, setNewPath] = useState('');
   const [isFolderBrowserOpen, setIsFolderBrowserOpen] = useState(false);
   const [preferredLanguage, setPreferredLanguage] = useState(getUserLanguage());
+  const { colorMode, setColorMode } = useColorMode();
+  const { accent, setAccent, themes, palette, colorHex } = useAppAccent();
 
   const [updateState, setUpdateState] = useState<UpdateState>({
     status: 'idle',
@@ -140,6 +154,131 @@ export function SettingsModal({
                 </Text>
               </Box>
 
+              {/* Appearance & Color Themes */}
+              <Box
+                p={3.5}
+                rounded="xl"
+                bg="bg.muted"
+                borderWidth="1px"
+                borderColor="border.subtle"
+              >
+                <HStack gap={2} mb={1}>
+                  <LuPalette />
+                  <Text fontSize="xs" fontWeight="semibold">
+                    App Theme & Accent Color
+                  </Text>
+                </HStack>
+                <Text fontSize="xs" color="fg.muted" mb={3}>
+                  Customize the interface appearance and choose your favorite color scheme.
+                </Text>
+
+                {/* Color Mode Toggle */}
+                <HStack gap={2} mb={3}>
+                  <Button
+                    size="xs"
+                    variant={colorMode === 'dark' ? 'solid' : 'outline'}
+                    colorPalette={colorMode === 'dark' ? palette : 'gray'}
+                    onClick={() => setColorMode('dark')}
+                  >
+                    <LuMoon /> Dark Mode
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={colorMode === 'light' ? 'solid' : 'outline'}
+                    colorPalette={colorMode === 'light' ? palette : 'gray'}
+                    onClick={() => setColorMode('light')}
+                  >
+                    <LuSun /> Light Mode
+                  </Button>
+                </HStack>
+
+                {/* Accent Color Swatches */}
+                <Text fontSize="2xs" color="fg.muted" fontWeight="semibold" mb={1.5}>
+                  ACCENT COLOR PRESET
+                </Text>
+                <HStack gap={2} wrap="wrap">
+                  {themes.map((th) => {
+                    const isSelected = accent === th.id;
+                    return (
+                      <Flex
+                        key={th.id}
+                        as="button"
+                        align="center"
+                        gap={1.5}
+                        px={2.5}
+                        py={1}
+                        rounded="lg"
+                        borderWidth="2px"
+                        borderColor={isSelected ? th.colorHex : 'transparent'}
+                        bg="bg.panel"
+                        cursor="pointer"
+                        transition="all 0.15s ease"
+                        _hover={{ borderColor: th.colorHex }}
+                        onClick={() => {
+                          setAccent(th.id);
+                          toaster.create({
+                            title: `Theme accent set to ${th.name}`,
+                            type: 'info',
+                          });
+                        }}
+                      >
+                        <Box w="12px" h="12px" rounded="full" bg={th.colorHex} />
+                        <Text fontSize="xs" fontWeight={isSelected ? 'bold' : 'normal'}>
+                          {th.name}
+                        </Text>
+                        {isSelected && <LuCheck size={12} color={th.colorHex} />}
+                      </Flex>
+                    );
+                  })}
+                </HStack>
+              </Box>
+
+              {/* Game Grid Layout Size */}
+              <Box
+                p={3.5}
+                rounded="xl"
+                bg="bg.muted"
+                borderWidth="1px"
+                borderColor="border.subtle"
+              >
+                <HStack gap={2} mb={1}>
+                  <LuLayoutGrid />
+                  <Text fontSize="xs" fontWeight="semibold">
+                    Game Library Grid Size
+                  </Text>
+                </HStack>
+                <Text fontSize="xs" color="fg.muted" mb={3}>
+                  Adjust the poster dimensions and card density for browsing your game collection.
+                </Text>
+
+                <HStack gap={2}>
+                  <Button
+                    size="xs"
+                    variant={gridSize === 'compact' ? 'solid' : 'outline'}
+                    colorPalette={gridSize === 'compact' ? palette : 'gray'}
+                    onClick={() => onGridSizeChange?.('compact')}
+                  >
+                    Compact (Small)
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={gridSize === 'medium' ? 'solid' : 'outline'}
+                    colorPalette={gridSize === 'medium' ? palette : 'gray'}
+                    onClick={() => onGridSizeChange?.('medium')}
+                  >
+                    Standard (Medium)
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant={gridSize === 'large' ? 'solid' : 'outline'}
+                    colorPalette={gridSize === 'large' ? palette : 'gray'}
+                    onClick={() => onGridSizeChange?.('large')}
+                  >
+                    Posters (Large)
+                  </Button>
+                </HStack>
+              </Box>
+
               {/* Patch Notes Language Preference */}
               <Box
                 p={3.5}
@@ -157,10 +296,9 @@ export function SettingsModal({
                 <Text fontSize="xs" color="fg.muted" mb={2.5}>
                   Filters Steam community announcements and ensures manifests match patch notes in your preferred language.
                 </Text>
-                <select
+                <AppSelect
                   value={preferredLanguage}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  onChange={(val) => {
                     setPreferredLanguage(val);
                     setUserLanguage(val);
                     toaster.create({
@@ -169,30 +307,20 @@ export function SettingsModal({
                       type: 'info',
                     });
                   }}
-                  style={{
-                    height: '32px',
-                    fontSize: '13px',
-                    borderRadius: '8px',
-                    padding: '0 10px',
-                    background: 'var(--chakra-colors-bg-panel)',
-                    color: 'var(--chakra-colors-fg)',
-                    border: '1px solid var(--chakra-colors-border-subtle)',
-                    outline: 'none',
-                    width: '100%',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <option value="auto">Auto (System Language)</option>
-                  <option value="en">English</option>
-                  <option value="es">Español (Spanish)</option>
-                  <option value="de">Deutsch (German)</option>
-                  <option value="fr">Français (French)</option>
-                  <option value="ru">Русский (Russian)</option>
-                  <option value="zh">简体中文 (Chinese)</option>
-                  <option value="ja">日本語 (Japanese)</option>
-                  <option value="ko">한국어 (Korean)</option>
-                  <option value="all">All Languages (No filtering)</option>
-                </select>
+                  width="100%"
+                  options={[
+                    { value: 'auto', label: 'Auto (System Language)' },
+                    { value: 'en', label: 'English' },
+                    { value: 'es', label: 'Español (Spanish)' },
+                    { value: 'de', label: 'Deutsch (German)' },
+                    { value: 'fr', label: 'Français (French)' },
+                    { value: 'ru', label: 'Русский (Russian)' },
+                    { value: 'zh', label: 'Chinese (Simplified) - 中文' },
+                    { value: 'ja', label: 'Japanese - 日本語' },
+                    { value: 'ko', label: 'Korean - 한국어' },
+                    { value: 'all', label: 'All Languages (No filtering)' },
+                  ]}
+                />
               </Box>
 
               {/* Custom Steam Library Folders */}
@@ -204,7 +332,7 @@ export function SettingsModal({
                   <Button
                     size="xs"
                     variant="subtle"
-                    colorPalette="blue"
+                    colorPalette={palette}
                     onClick={() => setIsFolderBrowserOpen(true)}
                   >
                     <LuFolder /> Browse Drives & Folders
@@ -225,7 +353,7 @@ export function SettingsModal({
                       if (e.key === 'Enter') handleAdd();
                     }}
                   />
-                  <Button size="sm" colorPalette="blue" onClick={() => handleAdd()}>
+                  <Button size="sm" colorPalette={palette} onClick={() => handleAdd()}>
                     <LuPlus /> Add
                   </Button>
                 </HStack>
@@ -284,12 +412,12 @@ export function SettingsModal({
               >
                 <Flex justify="space-between" align="center" mb={1}>
                   <HStack gap={2}>
-                    <LuSparkles color="var(--chakra-colors-blue-500)" />
+                    <LuSparkles color={colorHex} />
                     <Text fontSize="xs" fontWeight="semibold">
                       Steam Game Manager Updates
                     </Text>
                   </HStack>
-                  <Badge size="xs" colorPalette="blue" variant="subtle">
+                  <Badge size="xs" colorPalette={palette} variant="subtle">
                     v{updateState.currentVersion}
                   </Badge>
                 </Flex>
@@ -303,12 +431,12 @@ export function SettingsModal({
                     p={3}
                     mb={3}
                     rounded="lg"
-                    bg="blue.500/10"
+                    bg={`${palette}.500/10`}
                     borderWidth="1px"
-                    borderColor="blue.500/30"
+                    borderColor={`${palette}.500/30`}
                   >
                     <HStack justify="space-between" mb={1}>
-                      <Text fontSize="xs" fontWeight="bold" color="blue.400">
+                      <Text fontSize="xs" fontWeight="bold" color={`${palette}.400`}>
                         Version {updateState.newVersion} Available!
                       </Text>
                     </HStack>
@@ -319,7 +447,7 @@ export function SettingsModal({
                     )}
                     <Button
                       size="xs"
-                      colorPalette="blue"
+                      colorPalette={palette}
                       onClick={handleInstallUpdate}
                     >
                       <LuCloudDownload /> Install & Restart
@@ -328,7 +456,7 @@ export function SettingsModal({
                 )}
 
                 {updateState.status === 'downloading' && (
-                  <Box p={3} mb={3} rounded="lg" bg="bg.panel" borderWidth="1px" borderColor="blue.500">
+                  <Box p={3} mb={3} rounded="lg" bg="bg.panel" borderWidth="1px" borderColor={`${palette}.500`}>
                     <Flex justify="space-between" fontSize="xs" mb={1.5}>
                       <Text fontWeight="medium">Downloading Update...</Text>
                       <Text color="fg.muted">
@@ -338,7 +466,7 @@ export function SettingsModal({
                     <Box w="100%" h="6px" bg="bg.muted" rounded="full" overflow="hidden">
                       <Box
                         h="100%"
-                        bg="blue.500"
+                        bg={colorHex}
                         rounded="full"
                         transition="width 0.2s ease"
                         style={{ width: `${updateState.downloadProgress}%` }}
@@ -365,7 +493,7 @@ export function SettingsModal({
                   <Button
                     size="xs"
                     variant="subtle"
-                    colorPalette="blue"
+                    colorPalette={palette}
                     loading={updateState.status === 'checking'}
                     onClick={handleCheckUpdate}
                   >
@@ -378,7 +506,7 @@ export function SettingsModal({
                 <Button
                   size="sm"
                   variant="solid"
-                  colorPalette="blue"
+                  colorPalette={palette}
                   onClick={() => {
                     onRescan();
                     onClose();

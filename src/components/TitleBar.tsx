@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Box, Flex, HStack, Text } from '@chakra-ui/react';
-import { LuGamepad2 } from 'react-icons/lu';
 import { invoke } from '@tauri-apps/api/core';
 
 interface TitleBarProps {
@@ -59,6 +58,7 @@ export function TitleBar({ title = 'Steam Game Manager' }: TitleBarProps) {
     <Flex
       as="header"
       data-tauri-drag-region
+      onContextMenu={(e) => e.preventDefault()}
       h="32px"
       bg="bg.panel"
       borderBottomWidth="1px"
@@ -81,8 +81,8 @@ export function TitleBar({ title = 'Steam Game Manager' }: TitleBarProps) {
         pointerEvents="none"
         data-tauri-drag-region
       >
-        <Box color="blue.400" display="flex" alignItems="center">
-          <LuGamepad2 size={15} />
+        <Box display="flex" alignItems="center">
+          <img src="/app-icon.svg" width="16" height="16" style={{ borderRadius: '3px' }} alt="" />
         </Box>
         <Text
           fontSize="xs"

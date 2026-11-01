@@ -23,6 +23,7 @@ import {
 import { SteamGame } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 import { toaster } from '@/components/ui/toaster';
+import { useAppAccent } from '@/utils/theme';
 
 export interface ContextMenuState {
   isOpen: boolean;
@@ -46,6 +47,7 @@ export function ContextMenu({
   isHidden,
   onToggleHide,
 }: ContextMenuProps) {
+  const { palette, colorHex } = useAppAccent();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -115,6 +117,10 @@ export function ContextMenu({
   return (
     <Box
       ref={menuRef}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       position="fixed"
       left={`${safeX}px`}
       top={`${safeY}px`}
@@ -141,7 +147,7 @@ export function ContextMenu({
             {game.name}
           </Text>
           <HStack gap={1}>
-            <Badge size="xs" colorPalette="blue">
+            <Badge size="xs" colorPalette={palette}>
               #{game.appid}
             </Badge>
             <Text fontSize="2xs" color="fg.muted">
@@ -165,7 +171,7 @@ export function ContextMenu({
         <MenuItem
           icon={<LuZap />}
           label="⚡ Quick Switch Builds (Vault)"
-          color="blue.400"
+          color={colorHex}
           onClick={() => {
             onOpenGame(game, 'vault');
             onClose();
@@ -249,6 +255,7 @@ function MenuItem({
   onClick: () => void;
   color?: string;
 }) {
+  const { colorHex, palette } = useAppAccent();
   return (
     <Flex
       align="center"
@@ -261,8 +268,8 @@ function MenuItem({
       color={color || 'fg'}
       transition="all 0.12s ease"
       _hover={{
-        bg: 'blue.500/10',
-        color: 'blue.500',
+        bg: `${palette}.500/10`,
+        color: color || colorHex,
       }}
       onClick={onClick}
     >
