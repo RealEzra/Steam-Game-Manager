@@ -76,6 +76,60 @@ impl VaultManager {
         can_hl
     }
 
+    /// Checks if a relative path is a save file, user configuration, or mod setting
+    /// that should NEVER be deleted during version profile switches.
+    fn is_protected_path(rel_path: &Path) -> bool {
+        let path_str = rel_path.to_string_lossy().to_lowercase();
+        let normalized = path_str.replace('\\', "/");
+
+        // Protect internal Version Vault folder and Git tracking
+        if normalized.starts_with("version_vault") || normalized.starts_with(".git") {
+            return true;
+        }
+
+        // Check each component for common save/config directories
+        for comp in rel_path.components() {
+            let s = comp.as_os_str().to_string_lossy().to_lowercase();
+            match s.as_str() {
+                "saves" | "save" | "saved" | "savedata" | "savedgames" | "saved_games"
+                | "savegames" | "userdata" | "profiles" | "profile" => return true,
+                _ => {}
+            }
+        }
+
+        // Check common config/save file extensions
+        if let Some(ext) = rel_path.extension().and_then(|e| e.to_str()) {
+            let ext_lower = ext.to_lowercase();
+            if matches!(
+                ext_lower.as_str(),
+                "save" | "sav" | "ess" | "fos" | "bak"
+            ) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Recursively collects all relative file paths in a directory
+    fn collect_relative_paths(base_dir: &Path, current_dir: &Path, rel_set: &mut std::collections::HashSet<PathBuf>) {
+        if let Ok(entries) = fs::read_dir(current_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Ok(rel) = path.strip_prefix(base_dir) {
+                    if path.is_file() {
+                        rel_set.insert(rel.to_path_buf());
+                    } else if path.is_dir() {
+                        let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if dir_name != "version_vault" && dir_name != ".git" {
+                            Self::collect_relative_paths(base_dir, &path, rel_set);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn get_meta_file(vault_dir: &Path) -> PathBuf {
         vault_dir.join("vault_meta.json")
     }
@@ -326,16 +380,30 @@ impl VaultManager {
             None,
         );
 
-        // 1. Clean existing game directory contents to prevent version/dll pollution,
-        // then fast hardlink/copy sync: sync vault files into game directory.
-        if game_dir.exists() {
-            if let Ok(entries) = fs::read_dir(game_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file() {
-                        let _ = fs::remove_file(&path);
-                    } else if path.is_dir() {
-                        let _ = fs::remove_dir_all(&path);
+        // 1. Clean up only files from the previous profile that do not belong to the target profile
+        // instead of indiscriminately wiping the entire game folder!
+        // Steam games consist of multiple depots (e.g. 50MB exe depot + 40GB data/textures/sounds depot).
+        // Indiscriminately deleting everything wipes all other depot files, mods, and user saves.
+        if let Some(active_id) = &meta.active_profile_id {
+            if active_id != target_profile_id {
+                if let Some(prev_profile) = meta.profiles.iter().find(|p| &p.id == active_id) {
+                    let prev_vault_dir = Path::new(&prev_profile.vault_path);
+                    if prev_vault_dir.exists() {
+                        let mut prev_files = std::collections::HashSet::new();
+                        let mut target_files = std::collections::HashSet::new();
+
+                        Self::collect_relative_paths(prev_vault_dir, prev_vault_dir, &mut prev_files);
+                        Self::collect_relative_paths(vault_files_dir, vault_files_dir, &mut target_files);
+
+                        // Only remove files that were in the previous profile but are NOT in the target profile
+                        for old_file in prev_files {
+                            if !target_files.contains(&old_file) && !Self::is_protected_path(&old_file) {
+                                let game_file = game_dir.join(&old_file);
+                                if game_file.is_file() {
+                                    let _ = fs::remove_file(&game_file);
+                                }
+                            }
+                        }
                     }
                 }
             }

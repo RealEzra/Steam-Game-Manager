@@ -138,7 +138,7 @@ impl SteamManager {
             "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={appid}&count=100&maxlength=200&feeds=steam_community_announcements"
         );
 
-        let output = std::process::Command::new("curl")
+        let output = crate::downloader::create_hidden_command("curl")
             .args(["-s", "--connect-timeout", "6", &url])
             .output()
             .map_err(|e| format!("Failed to execute curl: {e}"))?;
@@ -212,7 +212,7 @@ impl SteamManager {
 
         // 2. Query Steam store API with fast timeout
         let url = format!("https://store.steampowered.com/api/appdetails?appids={appid}&filters=basic");
-        let output = std::process::Command::new("curl")
+        let output = crate::downloader::create_hidden_command("curl")
             .args([
                 "-s",
                 "--connect-timeout",
@@ -312,7 +312,7 @@ impl SteamManager {
 
         // 1. Query public SteamCMD info API: https://api.steamcmd.net/v1/info/{appid}
         let steamcmd_url = format!("https://api.steamcmd.net/v1/info/{appid}");
-        if let Ok(output) = std::process::Command::new("curl")
+        if let Ok(output) = crate::downloader::create_hidden_command("curl")
             .args(["-s", "--connect-timeout", "6", &steamcmd_url])
             .output()
         {
@@ -364,7 +364,7 @@ impl SteamManager {
 
         // 2. Query SteamDB manifests page directly: https://steamdb.info/depot/{depot_id}/manifests/
         let steamdb_url = format!("https://steamdb.info/depot/{depot_id}/manifests/");
-        if let Ok(output) = std::process::Command::new("curl")
+        if let Ok(output) = crate::downloader::create_hidden_command("curl")
             .args([
                 "-s",
                 "-L",

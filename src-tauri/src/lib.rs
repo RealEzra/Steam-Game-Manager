@@ -20,8 +20,12 @@ fn browse_directory(path: Option<String>) -> Result<steam::DirectoryListing, Str
 }
 
 #[tauri::command]
-fn get_steam_patch_notes(appid: u32, language: Option<String>) -> Result<Vec<steam::SteamPatchNote>, String> {
-    SteamManager::fetch_patch_notes(appid, language.as_deref())
+async fn get_steam_patch_notes(appid: u32, language: Option<String>) -> Result<Vec<steam::SteamPatchNote>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        SteamManager::fetch_patch_notes(appid, language.as_deref())
+    })
+    .await
+    .map_err(|e| format!("Task execution error: {e}"))?
 }
 
 #[tauri::command]
@@ -30,8 +34,12 @@ fn resolve_steam_apps_metadata(appids: Vec<u32>) -> Vec<steam::SteamAppMetadata>
 }
 
 #[tauri::command]
-fn fetch_depot_manifests(appid: u32, depot_id: String) -> Result<Vec<steam::BuildVersion>, String> {
-    SteamManager::fetch_depot_manifests(appid, &depot_id)
+async fn fetch_depot_manifests(appid: u32, depot_id: String) -> Result<Vec<steam::BuildVersion>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        SteamManager::fetch_depot_manifests(appid, &depot_id)
+    })
+    .await
+    .map_err(|e| format!("Task execution error: {e}"))?
 }
 
 #[tauri::command]
@@ -114,8 +122,12 @@ fn check_depot_downloader(custom_path: Option<String>) -> Result<String, String>
 }
 
 #[tauri::command]
-fn get_depot_downloader_status(custom_path: Option<String>) -> downloader::DepotDownloaderStatus {
-    DownloaderManager::get_depot_downloader_status(custom_path.as_deref())
+async fn get_depot_downloader_status(custom_path: Option<String>) -> Result<downloader::DepotDownloaderStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        DownloaderManager::get_depot_downloader_status(custom_path.as_deref())
+    })
+    .await
+    .map_err(|e| format!("Task execution error: {e}"))
 }
 
 #[tauri::command]
@@ -301,7 +313,7 @@ fn open_folder(path: String) -> Result<(), String> {
 fn open_steam_console() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
+        crate::downloader::create_hidden_command("cmd")
             .args(["/c", "start", "steam://open/console"])
             .spawn()
             .map_err(|e| e.to_string())?;

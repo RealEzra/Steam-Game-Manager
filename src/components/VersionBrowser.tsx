@@ -17,6 +17,8 @@ import {
 import {
   LuBookOpen,
   LuCheck,
+  LuChevronLeft,
+  LuChevronRight,
   LuClipboardPaste,
   LuCloudDownload,
   LuExternalLink,
@@ -24,6 +26,7 @@ import {
   LuLayers,
   LuPlus,
   LuRotateCcw,
+  LuSearch,
   LuSparkles,
   LuTag,
   LuTrash2,
@@ -90,6 +93,11 @@ export function VersionBrowser({
   // Automatically detected manifests on clipboard when user focuses the window
   const [pendingClipboardManifests, setPendingClipboardManifests] = useState<BuildVersion[]>([]);
 
+  // Search filter and pagination state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
+
   // Background fetch patch notes to match against manifests
   useEffect(() => {
     let cancelled = false;
@@ -111,20 +119,49 @@ export function VersionBrowser({
     };
   }, [game.appid, patchNoteLang]);
 
-  const loadVersions = () => {
-    const raw = getAllVersionsForDepot(
+  const [versionMutationTrigger, setVersionMutationTrigger] = useState(0);
+
+  const rawVersions = useMemo(() => {
+    return getAllVersionsForDepot(
       game.appid,
       activeDepot,
       currentManifest,
       game.build_id
     );
-    const enriched = matchManifestsToPatchNotes(raw, patchNotes, patchNoteLang);
-    setVersions(enriched);
+  }, [game.appid, activeDepot, currentManifest, game.build_id, versionMutationTrigger]);
+
+  const refreshVersions = () => {
+    setVersionMutationTrigger((c) => c + 1);
   };
 
   useEffect(() => {
-    loadVersions();
-  }, [game.appid, activeDepot, currentManifest, patchNotes, patchNoteLang]);
+    const enriched = matchManifestsToPatchNotes(rawVersions, patchNotes, patchNoteLang);
+    setVersions(enriched);
+  }, [rawVersions, patchNotes, patchNoteLang]);
+
+  // Reset page when switching depot or searching
+  useEffect(() => {
+    setPage(1);
+  }, [activeDepot, searchQuery]);
+
+  const filteredVersions = useMemo(() => {
+    if (!searchQuery.trim()) return versions;
+    const q = searchQuery.toLowerCase();
+    return versions.filter(
+      (v) =>
+        v.versionName.toLowerCase().includes(q) ||
+        v.manifestId.toLowerCase().includes(q) ||
+        (v.buildId && v.buildId.toLowerCase().includes(q)) ||
+        (v.releaseDate && v.releaseDate.toLowerCase().includes(q)) ||
+        (v.description && v.description.toLowerCase().includes(q))
+    );
+  }, [versions, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredVersions.length / pageSize));
+  const paginatedVersions = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredVersions.slice(start, start + pageSize);
+  }, [filteredVersions, page, pageSize]);
 
   // Check clipboard on window focus for SteamDB manifest data
   useEffect(() => {
@@ -205,7 +242,7 @@ export function VersionBrowser({
       }
 
       const added = saveMultipleCustomVersions(game.appid, activeDepot, parsed);
-      loadVersions();
+      refreshVersions();
       setPendingClipboardManifests([]);
 
       if (!selectedManifestId) {
@@ -231,7 +268,7 @@ export function VersionBrowser({
   const applyPendingClipboardManifests = () => {
     if (pendingClipboardManifests.length === 0) return;
     const added = saveMultipleCustomVersions(game.appid, activeDepot, pendingClipboardManifests);
-    loadVersions();
+    refreshVersions();
 
     if (!selectedManifestId) {
       onSelectVersion(pendingClipboardManifests[0]);
@@ -256,7 +293,7 @@ export function VersionBrowser({
 
       if (fetched && fetched.length > 0) {
         const added = saveMultipleCustomVersions(game.appid, activeDepot, fetched);
-        loadVersions();
+        refreshVersions();
         toaster.create({
           title: 'Manifests Synced',
           description: `Discovered ${fetched.length} manifests (${added} new) from local cache & Steam network.`,
@@ -294,7 +331,7 @@ export function VersionBrowser({
     }
 
     const added = saveMultipleCustomVersions(game.appid, activeDepot, detectedManifests);
-    loadVersions();
+    refreshVersions();
     setImportText('');
     setShowImportModal(false);
 
@@ -341,7 +378,7 @@ export function VersionBrowser({
     };
 
     saveCustomVersion(game.appid, activeDepot, customVer);
-    loadVersions();
+    refreshVersions();
     onSelectVersion(customVer);
     setNewVersionName('');
     setNewManifestId('');
@@ -358,7 +395,7 @@ export function VersionBrowser({
   const handleDeleteCustom = (versionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     deleteCustomVersion(game.appid, activeDepot, versionId);
-    loadVersions();
+    refreshVersions();
     toaster.create({
       title: 'Version Removed',
       type: 'info',
@@ -367,7 +404,7 @@ export function VersionBrowser({
 
   const handleClearAllCustom = () => {
     clearCustomVersions(game.appid, activeDepot);
-    loadVersions();
+    refreshVersions();
     toaster.create({
       title: 'Imported Versions Cleared',
       description: `Reset Depot ${activeDepot} to default presets.`,
@@ -902,6 +939,31 @@ export function VersionBrowser({
           </Box>
         )}
 
+        {/* Search & Filter Bar if multiple versions */}
+        {versions.length > 5 && (
+          <Box mb={3}>
+            <Flex gap={2} align="center">
+              <Box position="relative" flex="1">
+                <Input
+                  size="sm"
+                  placeholder={`Search ${versions.length} versions by name, manifest ID, build, or date...`}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  pl={8}
+                />
+                <Box position="absolute" left={2.5} top="50%" transform="translateY(-50%)" color="fg.muted" pointerEvents="none">
+                  <LuSearch size={14} />
+                </Box>
+              </Box>
+              {searchQuery && (
+                <Button size="xs" variant="ghost" onClick={() => setSearchQuery('')}>
+                  Clear
+                </Button>
+              )}
+            </Flex>
+          </Box>
+        )}
+
         {/* Versions Table / List */}
         <VStack gap={2.5} align="stretch">
           {versions.length === 0 ? (
@@ -946,8 +1008,24 @@ export function VersionBrowser({
                 </Button>
               </HStack>
             </Box>
+          ) : filteredVersions.length === 0 ? (
+            <Box
+              p={6}
+              rounded="xl"
+              borderWidth="1px"
+              borderColor="border.subtle"
+              textAlign="center"
+              color="fg.muted"
+            >
+              <Text fontSize="sm" mb={1}>
+                No versions match "{searchQuery}".
+              </Text>
+              <Button size="xs" variant="subtle" mt={2} onClick={() => setSearchQuery('')}>
+                Clear Search Filter
+              </Button>
+            </Box>
           ) : (
-            versions.map((ver) => {
+            paginatedVersions.map((ver) => {
               const isCurrent = ver.manifestId === currentManifest;
               const isSelected = selectedManifestId === ver.manifestId;
               const isImported = ver.id.startsWith('steamdb_') || ver.id.startsWith('steamcmd_');
@@ -1084,6 +1162,36 @@ export function VersionBrowser({
                 </Flex>
               );
             })
+          )}
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <Flex justify="space-between" align="center" pt={3} pb={1} px={1} wrap="wrap" gap={2}>
+              <Text fontSize="xs" color="fg.muted">
+                Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filteredVersions.length)} of {filteredVersions.length} versions
+              </Text>
+              <HStack gap={2}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  <LuChevronLeft /> Previous
+                </Button>
+                <Text fontSize="xs" fontWeight="semibold" px={1}>
+                  Page {page} of {totalPages}
+                </Text>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next <LuChevronRight />
+                </Button>
+              </HStack>
+            </Flex>
           )}
 
           {hasImportedVersions && (

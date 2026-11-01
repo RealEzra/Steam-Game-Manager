@@ -6,6 +6,19 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 
+/// Spawns a Command with CREATE_NO_WINDOW on Windows to prevent console flashing
+pub fn create_hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DowngradePlan {
     pub appid: u32,
@@ -166,13 +179,13 @@ impl DownloaderManager {
             }
         }
 
-        // 4. In system PATH
-        if let Ok(out) = Command::new(bin_name).arg("--version").output() {
+        // 4. In system PATH (use create_hidden_command to prevent console window popup on Windows)
+        if let Ok(out) = create_hidden_command(bin_name).arg("--version").output() {
             if out.status.success() || !out.stdout.is_empty() || !out.stderr.is_empty() {
                 return Some(PathBuf::from(bin_name));
             }
         }
-        if let Ok(out) = Command::new("depotdownloader").arg("--version").output() {
+        if let Ok(out) = create_hidden_command("depotdownloader").arg("--version").output() {
             if out.status.success() || !out.stdout.is_empty() || !out.stderr.is_empty() {
                 return Some(PathBuf::from("depotdownloader"));
             }
@@ -184,10 +197,10 @@ impl DownloaderManager {
     /// Gets status of DepotDownloader
     pub fn get_depot_downloader_status(custom_path: Option<&str>) -> DepotDownloaderStatus {
         if let Some(path) = Self::resolve_depot_downloader(custom_path) {
-            let version = Command::new(&path)
+            let version = create_hidden_command(&path)
                 .arg("--version")
                 .output()
-                .or_else(|_| Command::new(&path).arg("-h").output())
+                .or_else(|_| create_hidden_command(&path).arg("-h").output())
                 .ok()
                 .and_then(|out| {
                     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -240,7 +253,7 @@ impl DownloaderManager {
         let zip_path = tools_dir.join(zip_name);
 
         // Download archive using curl (available across Linux, macOS, and modern Windows)
-        let download_res = Command::new("curl")
+        let download_res = create_hidden_command("curl")
             .args(["-L", "-f", "-s", "-S", "-o", &zip_path.to_string_lossy(), &url])
             .status();
 
@@ -255,15 +268,15 @@ impl DownloaderManager {
 
         // Unpack archive
         let unpack_res = if is_win {
-            Command::new("tar")
+            create_hidden_command("tar")
                 .args(["-xf", &zip_path.to_string_lossy(), "-C", &tools_dir.to_string_lossy()])
                 .status()
         } else {
-            let res = Command::new("unzip")
+            let res = create_hidden_command("unzip")
                 .args(["-o", &zip_path.to_string_lossy(), "-d", &tools_dir.to_string_lossy()])
                 .status();
             if res.is_err() || !res.as_ref().unwrap().success() {
-                Command::new("tar")
+                create_hidden_command("tar")
                     .args(["-xf", &zip_path.to_string_lossy(), "-C", &tools_dir.to_string_lossy()])
                     .status()
             } else {
@@ -369,6 +382,12 @@ impl DownloaderManager {
         if src.is_file() {
             if let Some(parent) = dest.parent() {
                 let _ = fs::create_dir_all(parent);
+            }
+            // CRITICAL: Unlink dest before copying!
+            // If dest is a hardlink (to a Version Vault snapshot), overwriting it in-place
+            // writes directly into the shared inode, mutating and corrupting the snapshot in the vault!
+            if dest.exists() {
+                let _ = fs::remove_file(dest);
             }
             fs::copy(src, dest).map_err(|e| format!("Failed to copy {}: {e}", src.display()))?;
             return Ok(());
@@ -500,7 +519,7 @@ impl DownloaderManager {
             );
 
             // C. Build Command
-            let mut cmd = Command::new(&exe_path);
+            let mut cmd = create_hidden_command(&exe_path);
             cmd.arg("-app")
                 .arg(appid.to_string())
                 .arg("-depot")
@@ -811,11 +830,11 @@ impl DownloaderManager {
 
         if let Some(pid) = st.child_pid {
             if cfg!(target_os = "windows") {
-                let _ = Command::new("taskkill")
+                let _ = create_hidden_command("taskkill")
                     .args(["/PID", &pid.to_string(), "/F", "/T"])
                     .output();
             } else {
-                let _ = Command::new("kill")
+                let _ = create_hidden_command("kill")
                     .args(["-9", &pid.to_string()])
                     .output();
             }
