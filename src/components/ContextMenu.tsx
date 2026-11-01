@@ -161,7 +161,7 @@ export function ContextMenu({
       <VStack gap={0.5} align="stretch">
         <MenuItem
           icon={<LuDownload />}
-          label="Manage & Downgrade"
+          label="Manage & Switch Versions"
           onClick={() => {
             onOpenGame(game, 'downgrade');
             onClose();

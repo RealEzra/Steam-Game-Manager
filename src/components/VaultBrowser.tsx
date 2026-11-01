@@ -26,9 +26,10 @@ import {
   LuTrash2,
   LuZap,
 } from 'react-icons/lu';
-import { SteamGame, VaultProfile } from '@/types';
+import { SteamGame, VaultProfile, VaultProgressEvent } from '@/types';
 import { formatBytes, formatDate } from '@/utils/format';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { useAppAccent } from '@/utils/theme';
 
 interface VaultBrowserProps {
@@ -57,6 +58,7 @@ export function VaultBrowser({
   const [showSnapshotForm, setShowSnapshotForm] = useState(false);
   const [snapshotName, setSnapshotName] = useState('');
   const [isSnapshotting, setIsSnapshotting] = useState(false);
+  const [vaultProgress, setVaultProgress] = useState<VaultProgressEvent | null>(null);
 
   // Import form state
   const [showImportForm, setShowImportForm] = useState(false);
@@ -67,12 +69,28 @@ export function VaultBrowser({
   const [isImporting, setIsImporting] = useState(false);
   const [detectedDepotPath, setDetectedDepotPath] = useState<string | null>(null);
 
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<VaultProgressEvent>('vault_progress', (ev) => {
+      if (ev.payload.appid === game.appid) {
+        setVaultProgress(ev.payload);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [game.appid]);
+
   const loadProfiles = async () => {
     setIsLoading(true);
     try {
       const list = await invoke<VaultProfile[]>('list_vault_profiles', {
         libraryPath: game.library_path,
         appid: game.appid,
+        gamePath: game.full_path,
       });
       setProfiles(list);
     } catch (err) {
@@ -127,6 +145,7 @@ export function VaultBrowser({
     }
 
     setIsSnapshotting(true);
+    setVaultProgress(null);
     try {
       const currentManifest = game.mounted_depots[activeDepot] || selectedManifestId || 'current';
       const profile = await invoke<VaultProfile>('snapshot_current_build', {
@@ -156,6 +175,7 @@ export function VaultBrowser({
       });
     } finally {
       setIsSnapshotting(false);
+      setVaultProgress(null);
     }
   };
 
@@ -265,6 +285,37 @@ export function VaultBrowser({
 
   return (
     <VStack gap={5} align="stretch">
+      {/* Informational Callout: Version Vault vs Backups */}
+      <Box
+        p={3.5}
+        rounded="xl"
+        bg="bg.panel"
+        borderWidth="1px"
+        borderColor="border.subtle"
+      >
+        <Flex gap={3} align="flex-start">
+          <Box p={2} rounded="lg" bg={`${palette}.500/10`} color={colorHex} mt={0.5} flexShrink={0}>
+            <LuZap size={18} />
+          </Box>
+          <Box flex="1">
+            <HStack gap={2} mb={1}>
+              <Text fontSize="xs" fontWeight="bold">
+                Version Vault Snapshots vs. Game Backups
+              </Text>
+              <Badge colorPalette={palette} size="xs" variant="subtle">
+                Zero-Space Hardlinks
+              </Badge>
+            </HStack>
+            <Text fontSize="2xs" color="fg.muted" lineHeight="tall">
+              <strong>Version Vault Snapshots:</strong> Stored on the same library drive partition using OS hardlinks. They take <strong>0 extra disk space</strong> and swap entire game builds and manifests in milliseconds. When you download or change versions via the switcher, both your previous build and the new build are automatically snapshotted here so consecutive versions are always instantly swappable!
+            </Text>
+            <Text fontSize="2xs" color="fg.muted" mt={1} lineHeight="tall">
+              <strong>Full Backups (Backups Tab):</strong> Standalone deep-copy archives stored in an external backup directory. Use Backups for disaster recovery, saving your progress and mod configs (<code>.ini</code>, saves), or storing copies that survive complete game uninstallation.
+            </Text>
+          </Box>
+        </Flex>
+      </Box>
+
       {/* Current Active Status Card */}
       <Box
         p={4}
@@ -360,6 +411,20 @@ export function VaultBrowser({
                 Save Snapshot to Vault
               </Button>
             </Stack>
+
+            {isSnapshotting && vaultProgress && (
+              <Box mt={3} p={2.5} rounded="md" bg={`${palette}.500/10`} borderWidth="1px" borderColor={`${palette}.500/30`}>
+                <HStack justify="space-between" mb={1} fontSize="xs">
+                  <Text fontWeight="semibold">Hardlinking files into Vault...</Text>
+                  <Text fontWeight="bold">{vaultProgress.count.toLocaleString()} files ({formatBytes(vaultProgress.total_bytes)})</Text>
+                </HStack>
+                {vaultProgress.current_file && (
+                  <Text fontSize="2xs" color="fg.muted" truncate>
+                    {vaultProgress.current_file}
+                  </Text>
+                )}
+              </Box>
+            )}
           </Box>
         )}
 

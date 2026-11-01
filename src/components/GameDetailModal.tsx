@@ -32,16 +32,28 @@ import {
   LuFolderOpen,
   LuFolderSync,
   LuInfo,
+  LuKey,
   LuPlay,
   LuPlus,
   LuRefreshCw,
   LuRotateCcw,
+  LuShieldCheck,
+  LuSparkles,
   LuTrash2,
+  LuX,
   LuZap,
 } from 'react-icons/lu';
-import { BackupEntry, BuildVersion, SteamGame, SteamLibrary } from '@/types';
+import {
+  BackupEntry,
+  BuildVersion,
+  DepotDownloaderStatus,
+  DepotDownloadProgressEvent,
+  SteamGame,
+  SteamLibrary,
+} from '@/types';
 import { copyToClipboard, formatBytes, formatDate } from '@/utils/format';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { VersionBrowser } from './VersionBrowser';
 import { VaultBrowser } from './VaultBrowser';
 import { getDepotLabel, useGameManifestStats } from '@/utils/knownVersions';
@@ -91,7 +103,27 @@ export function GameDetailModal({
   const [manifestId, setManifestId] = useState('');
   const [selectedVersionName, setSelectedVersionName] = useState('');
   const [selectedBuildId, setSelectedBuildId] = useState(game.build_id || '');
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(() => {
+    try {
+      return localStorage.getItem('steam_game_manager_steam_user') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [password, setPassword] = useState('');
+  const [rememberPassword, setRememberPassword] = useState(true);
+  const [autoBackup, setAutoBackup] = useState(true);
+  const [autoApply, setAutoApply] = useState(true);
+  const [autoLock, setAutoLock] = useState(true);
+  const [customToolPath, setCustomToolPath] = useState('');
+  const [toolStatus, setToolStatus] = useState<DepotDownloaderStatus | null>(null);
+  const [isCheckingTool, setIsCheckingTool] = useState(false);
+  const [isInstallingTool, setIsInstallingTool] = useState(false);
+  const [isDowngrading, setIsDowngrading] = useState(false);
+  const [activeDowngrade, setActiveDowngrade] = useState<DepotDownloadProgressEvent | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [isSubmitting2fa, setIsSubmitting2fa] = useState(false);
+  const [showAdvancedAuth, setShowAdvancedAuth] = useState(false);
   const [depotDownloaderStatus, setDepotDownloaderStatus] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const [isApplyingDepot, setIsApplyingDepot] = useState(false);
@@ -191,25 +223,214 @@ export function GameDetailModal({
   };
 
   const handleCheckDepotDownloader = async () => {
-    try {
-      const path = await invoke<string>('check_depot_downloader', {
-        customPath: null,
-      });
-      setDepotDownloaderStatus(`Found: ${path}`);
+    await checkToolStatus();
+    if (toolStatus?.is_installed) {
       toaster.create({
         title: 'DepotDownloader Ready',
-        description: `Executable located at: ${path}`,
+        description: `Executable located at: ${toolStatus.executable_path}`,
         type: 'success',
       });
-    } catch (err) {
-      setDepotDownloaderStatus('Not found in PATH');
+    } else {
       toaster.create({
         title: 'DepotDownloader Not Detected',
-        description: 'Make sure DepotDownloader is installed or in your system PATH.',
+        description: 'Click "Install Helper" or install DepotDownloader in your system PATH.',
         type: 'warning',
       });
     }
   };
+
+  const checkToolStatus = async (overridePath?: string) => {
+    setIsCheckingTool(true);
+    try {
+      const res = await invoke<DepotDownloaderStatus>('get_depot_downloader_status', {
+        customPath: (overridePath !== undefined ? overridePath : customToolPath).trim() || null,
+      });
+      setToolStatus(res);
+      setDepotDownloaderStatus(res.is_installed ? `Installed: ${res.version_info || 'Ready'}` : 'Not found');
+    } catch (e) {
+      console.error('Failed to check tool status:', e);
+    } finally {
+      setIsCheckingTool(false);
+    }
+  };
+
+  const handleInstallHelper = async () => {
+    setIsInstallingTool(true);
+    try {
+      const path = await invoke<string>('install_depot_downloader_tool');
+      toaster.create({
+        title: 'DepotDownloader Helper Ready',
+        description: `Helper installed at: ${path}`,
+        type: 'success',
+      });
+      await checkToolStatus();
+    } catch (err: any) {
+      toaster.create({
+        title: 'Installation Failed',
+        description: String(err),
+        type: 'error',
+      });
+    } finally {
+      setIsInstallingTool(false);
+    }
+  };
+
+  const handleStartAutomatedDowngrade = async () => {
+    if (!manifestId.trim()) {
+      toaster.create({
+        title: 'Manifest ID Required',
+        description: 'Please select a version from the browser or enter a Manifest ID.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    if (username.trim()) {
+      try {
+        localStorage.setItem('steam_game_manager_steam_user', username.trim());
+      } catch {}
+    }
+
+    setIsDowngrading(true);
+    setActiveDowngrade({
+      appid: game.appid,
+      depot_id: activeDepot,
+      manifest_id: manifestId.trim(),
+      step: 'starting',
+      percent: 5,
+      message: 'Preparing automated version change...',
+      speed_mb_s: null,
+      bytes_downloaded: null,
+      total_bytes: null,
+    });
+
+    try {
+      await invoke('start_automated_downgrade', {
+        options: {
+          appid: game.appid,
+          depot_id: activeDepot,
+          manifest_id: manifestId.trim(),
+          game_path: effectiveGamePath,
+          steam_path: steamPath,
+          library_path: targetLibrary || game.library_path,
+          game_name: game.name,
+          username: username.trim() || null,
+          password: password.trim() || null,
+          remember_password: rememberPassword,
+          auto_backup: autoBackup,
+          auto_apply: autoApply,
+          auto_lock: autoLock,
+          custom_tool_path: customToolPath.trim() || null,
+        },
+      });
+    } catch (err: any) {
+      setIsDowngrading(false);
+      setActiveDowngrade(null);
+      toaster.create({
+        title: 'Failed to start version change',
+        description: String(err),
+        type: 'error',
+      });
+    }
+  };
+
+  const handleSubmit2fa = async () => {
+    if (!twoFactorCode.trim()) return;
+    setIsSubmitting2fa(true);
+    try {
+      await invoke('submit_depot_downloader_2fa', { code: twoFactorCode.trim() });
+      toaster.create({
+        title: 'Submitted Steam Guard Code',
+        description: 'Authenticating with Steam...',
+        type: 'info',
+      });
+      setTwoFactorCode('');
+    } catch (err: any) {
+      toaster.create({
+        title: 'Failed to submit 2FA',
+        description: String(err),
+        type: 'error',
+      });
+    } finally {
+      setIsSubmitting2fa(false);
+    }
+  };
+
+  const handlePasswordSubmit = async () => {
+    if (!password) return;
+    setIsSubmitting2fa(true);
+    try {
+      await invoke('submit_depot_downloader_2fa', { code: password });
+      toaster.create({
+        title: 'Submitted Password',
+        description: 'Logging into Steam...',
+        type: 'info',
+      });
+    } catch (err: any) {
+      toaster.create({
+        title: 'Failed to submit password',
+        description: String(err),
+        type: 'error',
+      });
+    } finally {
+      setIsSubmitting2fa(false);
+    }
+  };
+
+  const handleCancelDowngrade = async () => {
+    try {
+      await invoke('cancel_automated_downgrade');
+      setIsDowngrading(false);
+      setActiveDowngrade(null);
+      toaster.create({
+        title: 'Version Switch Cancelled',
+        type: 'info',
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      checkToolStatus();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<DepotDownloadProgressEvent>('depot_download_progress', (ev) => {
+      const p = ev.payload;
+      if (p.appid === game?.appid && p.depot_id === activeDepot) {
+        setActiveDowngrade(p);
+        if (p.step === 'finished') {
+          setIsDowngrading(false);
+          toaster.create({
+            title: 'Version Switch Complete!',
+            description: `Successfully downloaded, backed up, and applied depot ${p.depot_id}.`,
+            type: 'success',
+          });
+          loadBackups();
+          onRefreshGame?.();
+        } else if (p.step === 'error') {
+          setIsDowngrading(false);
+          toaster.create({
+            title: 'Version Switch Error',
+            description: p.message,
+            type: 'error',
+          });
+        } else if (p.step === 'cancelled') {
+          setIsDowngrading(false);
+        }
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [game?.appid, activeDepot]);
 
   const handleApplyDownloadedDepot = async () => {
     if (!steamPath) {
@@ -249,10 +470,11 @@ export function GameDetailModal({
       }
 
       toaster.create({
-        title: 'Downgrade Applied Successfully!',
+        title: 'Version Applied Successfully!',
         description: msg,
         type: 'success',
       });
+      loadBackups();
       onRefreshGame?.();
     } catch (err) {
       toaster.create({
@@ -536,7 +758,7 @@ export function GameDetailModal({
                 fontSize="sm"
               >
                 <LuDownload />
-                Builds & Downgrade
+                Versions & Switcher
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="vault"
@@ -650,7 +872,7 @@ export function GameDetailModal({
                         Step 2
                       </Badge>
                       <Heading size="sm">
-                        Execute Downgrade for {getDepotLabel(game.appid, activeDepot)}
+                        Install & Switch Version for {getDepotLabel(game.appid, activeDepot)}
                       </Heading>
                     </HStack>
 
@@ -664,7 +886,7 @@ export function GameDetailModal({
                   <Text fontSize="xs" color="fg.muted" mb={4}>
                     {manifestId
                       ? `Ready to download and apply Depot ${activeDepot} with Manifest ${manifestId}.`
-                      : 'Choose a version above from the browser or enter a custom Manifest ID below to generate downgrade commands.'}
+                      : 'Choose a version above from the browser or enter a custom Manifest ID below to generate installation and switcher commands.'}
                   </Text>
 
                   {/* Manual Manifest input if user wants to override */}
@@ -716,7 +938,321 @@ export function GameDetailModal({
                   </Stack>
 
                   <VStack gap={4} align="stretch">
-                    {/* Method 1: Official Steam Client Console */}
+                    {/* Method 1: Automated 1-Click Downgrade (Managed DepotDownloader) */}
+                    <Box
+                      p={4}
+                      rounded="xl"
+                      bg="bg.muted"
+                      borderWidth="2px"
+                      borderColor={colorHex}
+                      position="relative"
+                    >
+                      <Flex justify="space-between" align="center" mb={2} wrap="wrap" gap={2}>
+                        <HStack gap={2}>
+                          <Badge colorPalette={palette} variant="solid" size="xs">
+                            Method 1
+                          </Badge>
+                          <Text fontSize="xs" fontWeight="bold">
+                            ⚡ Automated 1-Click Version Switch (Recommended)
+                          </Text>
+                          <Badge colorPalette={toolStatus?.is_installed ? 'green' : 'orange'} size="xs">
+                            {toolStatus?.is_installed ? 'Helper Ready' : 'Helper Tool Needed'}
+                          </Badge>
+                        </HStack>
+
+                        <HStack gap={2}>
+                          {toolStatus?.is_installed ? (
+                            <Text fontSize="2xs" color="fg.muted" truncate maxW="200px" title={toolStatus.executable_path || ''}>
+                              {toolStatus.version_info || 'DepotDownloader Ready'}
+                            </Text>
+                          ) : (
+                            <Button
+                              size="2xs"
+                              colorPalette={palette}
+                              variant="solid"
+                              loading={isInstallingTool}
+                              onClick={handleInstallHelper}
+                            >
+                              <LuSparkles /> 1-Click Install Helper Tool
+                            </Button>
+                          )}
+                          <Button
+                            size="2xs"
+                            variant="ghost"
+                            onClick={() => setShowAdvancedAuth(!showAdvancedAuth)}
+                          >
+                            {showAdvancedAuth ? 'Hide Options' : 'Auth & Options'}
+                          </Button>
+                        </HStack>
+                      </Flex>
+
+                      <Text fontSize="2xs" color="fg.muted" mb={3}>
+                        Automatically backs up game configs and saves, creates a pre-switch Vault snapshot, downloads depot chunks, applies files to your game folder, saves the new build into Version Vault, and locks the Steam manifest.
+                      </Text>
+
+                      {/* Download In-Progress Live Status Card */}
+                      {isDowngrading && activeDowngrade && (
+                        <Box
+                          p={3.5}
+                          mb={3}
+                          rounded="lg"
+                          bg="bg.panel"
+                          borderWidth="1px"
+                          borderColor={colorHex}
+                          animation="scale-fade-in 0.15s ease-out"
+                        >
+                          <Flex justify="space-between" align="center" mb={2}>
+                            <HStack gap={2}>
+                              <Badge colorPalette={palette} size="xs" variant="solid">
+                                {activeDowngrade.step.toUpperCase()}
+                              </Badge>
+                              <Text fontSize="xs" fontWeight="semibold">
+                                {activeDowngrade.step === 'backup' && 'Creating Pre-Switch Safety Snapshot...'}
+                                {activeDowngrade.step === 'connecting' && 'Connecting to Steam CDN...'}
+                                {activeDowngrade.step === 'downloading' && 'Downloading & Validating Depot...'}
+                                {activeDowngrade.step === 'needs_2fa' && 'Steam Guard 2FA Required'}
+                                {activeDowngrade.step === 'needs_password' && 'Steam Password Required'}
+                                {activeDowngrade.step === 'applying' && 'Applying Files to Game Directory...'}
+                                {activeDowngrade.step === 'locking' && 'Locking Steam Manifest...'}
+                                {activeDowngrade.step === 'finished' && 'Version Switch Complete!'}
+                                {activeDowngrade.step === 'error' && 'Error Occurred'}
+                                {activeDowngrade.step === 'cancelled' && 'Version Switch Cancelled'}
+                              </Text>
+                            </HStack>
+
+                            <HStack gap={3}>
+                              {activeDowngrade.speed_mb_s && (
+                                <Text fontSize="xs" fontWeight="bold" color={colorHex}>
+                                  {activeDowngrade.speed_mb_s.toFixed(1)} MB/s
+                                </Text>
+                              )}
+                              <Text fontSize="xs" fontWeight="bold">
+                                {Math.round(activeDowngrade.percent)}%
+                              </Text>
+                            </HStack>
+                          </Flex>
+
+                          {/* Progress Bar */}
+                          <Box w="100%" h="7px" bg="bg.muted" rounded="full" overflow="hidden" mb={2}>
+                            <Box
+                              h="100%"
+                              bg={colorHex}
+                              rounded="full"
+                              transition="width 0.25s ease"
+                              style={{ width: `${Math.min(100, Math.max(0, activeDowngrade.percent))}%` }}
+                            />
+                          </Box>
+
+                          <Text fontSize="2xs" color="fg.muted" truncate mb={2} title={activeDowngrade.message}>
+                            {activeDowngrade.message}
+                          </Text>
+
+                          {/* Password Input Prompt */}
+                          {activeDowngrade.step === 'needs_password' && (
+                            <Box p={3} my={2} rounded="md" bg={`${palette}.500/10`} borderWidth="1px" borderColor={`${palette}.500/30`}>
+                              <HStack gap={2} mb={1.5}>
+                                <LuKey color={colorHex} />
+                                <Text fontSize="xs" fontWeight="bold">
+                                  Steam Account Password Required
+                                </Text>
+                              </HStack>
+                              <Text fontSize="2xs" color="fg.muted" mb={2}>
+                                Enter your Steam password to log into your Steam account:
+                              </Text>
+                              <HStack gap={2}>
+                                <Input
+                                  type="password"
+                                  placeholder="Enter Steam password..."
+                                  size="sm"
+                                  value={password}
+                                  onChange={(e) => setPassword(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handlePasswordSubmit();
+                                  }}
+                                />
+                                <Button
+                                  size="sm"
+                                  colorPalette={palette}
+                                  loading={isSubmitting2fa}
+                                  onClick={handlePasswordSubmit}
+                                >
+                                  Submit Password
+                                </Button>
+                              </HStack>
+                            </Box>
+                          )}
+
+                          {/* 2FA Input Prompt */}
+                          {activeDowngrade.step === 'needs_2fa' && (
+                            <Box p={3} my={2} rounded="md" bg={`${palette}.500/10`} borderWidth="1px" borderColor={`${palette}.500/30`}>
+                              <HStack gap={2} mb={1.5}>
+                                <LuKey color={colorHex} />
+                                <Text fontSize="xs" fontWeight="bold">
+                                  Steam Guard Code Required
+                                </Text>
+                              </HStack>
+                              <Text fontSize="2xs" color="fg.muted" mb={2}>
+                                Enter the 5-character code from your Steam Mobile Authenticator app or email address:
+                              </Text>
+                              <HStack gap={2}>
+                                <Input
+                                  placeholder="e.g. R4K2M"
+                                  size="sm"
+                                  maxW="140px"
+                                  value={twoFactorCode}
+                                  onChange={(e) => setTwoFactorCode(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSubmit2fa();
+                                  }}
+                                />
+                                <Button
+                                  size="sm"
+                                  colorPalette={palette}
+                                  loading={isSubmitting2fa}
+                                  onClick={handleSubmit2fa}
+                                >
+                                  Submit Code
+                                </Button>
+                              </HStack>
+                            </Box>
+                          )}
+
+                          <Flex justify="flex-end" mt={2}>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              colorPalette="red"
+                              onClick={handleCancelDowngrade}
+                            >
+                              <LuX /> Cancel Download
+                            </Button>
+                          </Flex>
+                        </Box>
+                      )}
+
+                      {/* Credentials & Automation Options Drawer */}
+                      {showAdvancedAuth && (
+                        <Box p={3} mb={3} rounded="lg" bg="bg.panel" borderWidth="1px" borderColor="border.subtle">
+                          <Text fontSize="2xs" fontWeight="bold" textTransform="uppercase" color="fg.muted" mb={2}>
+                            Authentication & Switcher Options
+                          </Text>
+                          <Stack direction={{ base: 'column', md: 'row' }} gap={2.5} mb={2.5}>
+                            <Box flex="1">
+                              <Text fontSize="2xs" fontWeight="semibold" mb={1}>
+                                Steam Username:
+                              </Text>
+                              <Input
+                                size="sm"
+                                placeholder="Steam account username"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                              />
+                            </Box>
+                            <Box flex="1">
+                              <Text fontSize="2xs" fontWeight="semibold" mb={1}>
+                                Steam Password (Optional):
+                              </Text>
+                              <Input
+                                size="sm"
+                                type="password"
+                                placeholder="Leave blank if token cached"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                              />
+                            </Box>
+                          </Stack>
+
+                          <HStack gap={4} wrap="wrap" fontSize="xs">
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={rememberPassword}
+                                onChange={(e) => setRememberPassword(e.target.checked)}
+                              />
+                              <Text fontSize="xs">Remember credentials</Text>
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={autoBackup}
+                                onChange={(e) => setAutoBackup(e.target.checked)}
+                              />
+                              <Text fontSize="xs">Auto-backup configs & saves, and snapshot build in Vault</Text>
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={autoApply}
+                                onChange={(e) => setAutoApply(e.target.checked)}
+                              />
+                              <Text fontSize="xs">Auto-apply files to game folder</Text>
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={autoLock}
+                                onChange={(e) => setAutoLock(e.target.checked)}
+                              />
+                              <Text fontSize="xs">Auto-lock Steam manifest</Text>
+                            </label>
+                          </HStack>
+
+                          {/* Custom Path Override */}
+                          <Box mt={2.5}>
+                            <Text fontSize="2xs" color="fg.muted" mb={1}>
+                              Custom DepotDownloader Path (Optional):
+                            </Text>
+                            <Input
+                              size="xs"
+                              placeholder="e.g. /usr/bin/DepotDownloader or C:\tools\DepotDownloader.exe"
+                              value={customToolPath}
+                              onChange={(e) => {
+                                setCustomToolPath(e.target.value);
+                                checkToolStatus(e.target.value);
+                              }}
+                            />
+                          </Box>
+                        </Box>
+                      )}
+
+                      {/* Action Bar */}
+                      <Flex justify="space-between" align="center" wrap="wrap" gap={2}>
+                        <HStack gap={2} fontSize="2xs" color="fg.muted">
+                          <LuShieldCheck color={colorHex} size={14} />
+                          <Text>
+                            {autoBackup ? 'Pre-change snapshot & saves backup enabled' : 'Snapshots & backups disabled'}
+                            {' • '}
+                            {autoApply ? 'Instant file copy enabled' : 'Manual copy'}
+                          </Text>
+                        </HStack>
+
+                        <HStack gap={2}>
+                          {!toolStatus?.is_installed && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              loading={isInstallingTool}
+                              onClick={handleInstallHelper}
+                            >
+                              <LuDownload /> Install Helper
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            colorPalette={palette}
+                            variant="solid"
+                            disabled={!manifestId || isDowngrading}
+                            loading={isDowngrading}
+                            onClick={handleStartAutomatedDowngrade}
+                          >
+                            <LuSparkles />
+                            {isDowngrading ? 'Switching Version...' : 'Start 1-Click Version Switch'}
+                          </Button>
+                        </HStack>
+                      </Flex>
+                    </Box>
+
+                    {/* Method 2: Official Steam Client Console */}
                     <Box
                       p={3.5}
                       rounded="lg"
@@ -726,11 +1262,11 @@ export function GameDetailModal({
                     >
                       <Flex justify="space-between" align="center" mb={2}>
                         <HStack gap={2}>
-                          <Badge colorPalette={palette} variant="solid" size="xs">
-                            Method 1
+                          <Badge colorPalette="gray" variant="solid" size="xs">
+                            Method 2
                           </Badge>
                           <Text fontSize="xs" fontWeight="bold">
-                            Official Steam Console (Recommended)
+                            Official Steam Console (Manual / External)
                           </Text>
                         </HStack>
                         <Button
@@ -806,7 +1342,7 @@ export function GameDetailModal({
                       </Flex>
                     </Box>
 
-                    {/* Method 2: DepotDownloader CLI */}
+                    {/* Method 3: DepotDownloader CLI */}
                     <Box
                       p={3.5}
                       rounded="lg"
@@ -816,11 +1352,11 @@ export function GameDetailModal({
                     >
                       <Flex justify="space-between" align="center" mb={2}>
                         <HStack gap={2}>
-                          <Badge colorPalette="purple" variant="solid" size="xs">
-                            Method 2
+                          <Badge colorPalette="gray" variant="solid" size="xs">
+                            Method 3
                           </Badge>
                           <Text fontSize="xs" fontWeight="bold">
-                            DepotDownloader CLI
+                            Manual DepotDownloader CLI Command
                           </Text>
                         </HStack>
                         <HStack gap={2}>
@@ -832,6 +1368,7 @@ export function GameDetailModal({
                           <Button
                             size="2xs"
                             variant="subtle"
+                            loading={isCheckingTool}
                             onClick={handleCheckDepotDownloader}
                           >
                             Check CLI Status
@@ -879,7 +1416,10 @@ export function GameDetailModal({
                 activeDepot={activeDepot}
                 selectedManifestId={manifestId}
                 selectedVersionName={selectedVersionName}
-                onProfileSwitched={onRefreshGame}
+                onProfileSwitched={() => {
+                  loadBackups();
+                  onRefreshGame?.();
+                }}
               />
             </Tabs.Content>
 
@@ -898,7 +1438,7 @@ export function GameDetailModal({
                     Backup Game Files & Save Data
                   </Heading>
                   <Text fontSize="xs" color="fg.muted" mb={4}>
-                    Create a safety snapshot before overwriting files with an older build.
+                    Create a standalone backup before switching game versions or testing mods.
                   </Text>
 
                   <Flex gap={2.5} mb={4} wrap="wrap">
@@ -916,7 +1456,7 @@ export function GameDetailModal({
                       colorPalette={backupType === 'full' ? palette : 'gray'}
                       onClick={() => setBackupType('full')}
                     >
-                      Full Game Directory Snapshot
+                      Full Game Directory Archive
                     </Button>
                     <Button
                       size="sm"

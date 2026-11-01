@@ -114,6 +114,40 @@ fn check_depot_downloader(custom_path: Option<String>) -> Result<String, String>
 }
 
 #[tauri::command]
+fn get_depot_downloader_status(custom_path: Option<String>) -> downloader::DepotDownloaderStatus {
+    DownloaderManager::get_depot_downloader_status(custom_path.as_deref())
+}
+
+#[tauri::command]
+fn install_depot_downloader_tool() -> Result<String, String> {
+    DownloaderManager::install_depot_downloader_tool()
+}
+
+#[tauri::command]
+fn start_automated_downgrade(
+    app: tauri::AppHandle,
+    state: tauri::State<downloader::DownloadStateHandle>,
+    options: downloader::AutomatedDowngradeOptions,
+) -> Result<(), String> {
+    DownloaderManager::start_automated_downgrade(app, (*state).clone(), options)
+}
+
+#[tauri::command]
+fn submit_depot_downloader_2fa(
+    state: tauri::State<downloader::DownloadStateHandle>,
+    code: String,
+) -> Result<(), String> {
+    DownloaderManager::submit_depot_2fa((*state).clone(), &code)
+}
+
+#[tauri::command]
+fn cancel_automated_downgrade(
+    state: tauri::State<downloader::DownloadStateHandle>,
+) -> Result<(), String> {
+    DownloaderManager::cancel_automated_downgrade((*state).clone())
+}
+
+#[tauri::command]
 fn check_downloaded_depot(steam_path: String, appid: u32, depot_id: String) -> bool {
     DownloaderManager::check_downloaded_depot(&steam_path, appid, &depot_id).is_some()
 }
@@ -135,12 +169,17 @@ fn apply_downloaded_depot(
 }
 
 #[tauri::command]
-fn list_vault_profiles(library_path: String, appid: u32) -> Vec<VaultProfile> {
-    VaultManager::list_profiles(&library_path, appid)
+fn list_vault_profiles(library_path: String, appid: u32, game_path: Option<String>) -> Vec<VaultProfile> {
+    if let Some(gp) = &game_path {
+        VaultManager::list_profiles_for_game(&library_path, gp, appid)
+    } else {
+        VaultManager::list_profiles(&library_path, appid)
+    }
 }
 
 #[tauri::command]
-fn snapshot_current_build(
+async fn snapshot_current_build(
+    app: tauri::AppHandle,
     library_path: String,
     appid: u32,
     game_path: String,
@@ -149,15 +188,20 @@ fn snapshot_current_build(
     depot_id: String,
     manifest_id: String,
 ) -> Result<VaultProfile, String> {
-    VaultManager::snapshot_current_build(
-        &library_path,
-        appid,
-        &game_path,
-        &version_name,
-        &build_id,
-        &depot_id,
-        &manifest_id,
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        VaultManager::snapshot_current_build(
+            &library_path,
+            appid,
+            &game_path,
+            &version_name,
+            &build_id,
+            &depot_id,
+            &manifest_id,
+            Some(&app),
+        )
+    })
+    .await
+    .map_err(|e| format!("Task execution error: {e}"))?
 }
 
 #[tauri::command]
@@ -182,18 +226,24 @@ fn import_downloaded_to_vault(
 }
 
 #[tauri::command]
-fn switch_build_profile(
+async fn switch_build_profile(
+    app: tauri::AppHandle,
     library_path: String,
     appid: u32,
     game_path: String,
     target_profile_id: String,
 ) -> Result<VaultProfile, String> {
-    VaultManager::switch_profile(
-        &library_path,
-        appid,
-        &game_path,
-        &target_profile_id,
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        VaultManager::switch_profile(
+            &library_path,
+            appid,
+            &game_path,
+            &target_profile_id,
+            Some(&app),
+        )
+    })
+    .await
+    .map_err(|e| format!("Task execution error: {e}"))?
 }
 
 #[tauri::command]
@@ -223,6 +273,22 @@ fn open_folder(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
+        if std::path::Path::new("/mnt/c/Windows/explorer.exe").exists() {
+            let win_path = if path.starts_with("/mnt/") && path.len() >= 7 {
+                let drive_letter = path.chars().nth(5).unwrap_or('c').to_ascii_uppercase();
+                let sub_path = &path[6..].replace('/', "\\");
+                format!("{drive_letter}:{sub_path}")
+            } else {
+                path.clone()
+            };
+            if std::process::Command::new("/mnt/c/Windows/explorer.exe")
+                .arg(&win_path)
+                .spawn()
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
         std::process::Command::new("xdg-open")
             .arg(&path)
             .spawn()
@@ -249,6 +315,12 @@ fn open_steam_console() -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
+        if std::path::Path::new("/mnt/c/Windows/System32/cmd.exe").exists() {
+            let _ = std::process::Command::new("/mnt/c/Windows/System32/cmd.exe")
+                .args(["/c", "start", "steam://open/console"])
+                .spawn();
+            return Ok(());
+        }
         std::process::Command::new("xdg-open")
             .arg("steam://open/console")
             .spawn()
@@ -387,6 +459,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .manage(downloader::init_download_state())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -403,6 +476,11 @@ pub fn run() {
             delete_backup,
             create_downgrade_plan,
             check_depot_downloader,
+            get_depot_downloader_status,
+            install_depot_downloader_tool,
+            start_automated_downgrade,
+            submit_depot_downloader_2fa,
+            cancel_automated_downgrade,
             check_downloaded_depot,
             get_downloaded_depot_path,
             apply_downloaded_depot,

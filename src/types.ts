@@ -102,3 +102,47 @@ export interface VaultProfile {
   size_bytes: number;
 }
 
+export interface DepotDownloaderStatus {
+  is_installed: boolean;
+  executable_path: string | null;
+  version_info: string | null;
+}
+
+export interface AutomatedDowngradeOptions {
+  appid: number;
+  depot_id: string;
+  manifest_id: string;
+  game_path: string;
+  steam_path?: string | null;
+  library_path?: string | null;
+  game_name?: string | null;
+  username?: string | null;
+  password?: string | null;
+  remember_password?: boolean;
+  auto_backup?: boolean;
+  auto_apply?: boolean;
+  auto_lock?: boolean;
+  custom_tool_path?: string | null;
+}
+
+export interface DepotDownloadProgressEvent {
+  appid: number;
+  depot_id: string;
+  manifest_id: string;
+  step: 'idle' | 'backup' | 'starting' | 'connecting' | 'needs_2fa' | 'needs_password' | 'downloading' | 'applying' | 'locking' | 'finished' | 'error' | 'cancelled';
+  percent: number;
+  message: string;
+  speed_mb_s?: number | null;
+  bytes_downloaded?: number | null;
+  total_bytes?: number | null;
+}
+
+export interface VaultProgressEvent {
+  appid: number;
+  step: 'snapshotting' | 'switching' | 'done';
+  count: number;
+  total_bytes: number;
+  current_file: string;
+}
+
+

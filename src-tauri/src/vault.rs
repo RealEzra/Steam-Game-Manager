@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use tauri::Emitter;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultProfile {
@@ -15,6 +16,15 @@ pub struct VaultProfile {
     pub is_active: bool,
     pub created_at: u64,
     pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultProgressEvent {
+    pub appid: u32,
+    pub step: String, // "snapshotting" | "switching" | "done"
+    pub count: usize,
+    pub total_bytes: u64,
+    pub current_file: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +48,32 @@ impl VaultManager {
         let vault = steamapps.join("version_vault").join(appid.to_string());
         let _ = fs::create_dir_all(&vault);
         vault
+    }
+
+    /// Resolves the vault directory on the EXACT same drive partition as the game directory
+    pub fn get_vault_dir_for_game(library_path: &str, game_path: &str, appid: u32) -> PathBuf {
+        let game_dir = Path::new(game_path);
+        for ancestor in game_dir.ancestors() {
+            if ancestor.file_name().and_then(|n| n.to_str()) == Some("steamapps") {
+                let vault = ancestor.join("version_vault").join(appid.to_string());
+                let _ = fs::create_dir_all(&vault);
+                return vault;
+            }
+        }
+        Self::get_vault_dir(library_path, appid)
+    }
+
+    /// Probes if zero-space filesystem hard links are supported between src and dest
+    pub fn probe_hardlinks(src_dir: &Path, dest_dir: &Path) -> bool {
+        let probe_src = src_dir.join(".vaulthl_probe_src");
+        let probe_dest = dest_dir.join(".vaulthl_probe_dest");
+        if fs::write(&probe_src, b"probe").is_err() {
+            return false;
+        }
+        let can_hl = fs::hard_link(&probe_src, &probe_dest).is_ok();
+        let _ = fs::remove_file(&probe_src);
+        let _ = fs::remove_file(&probe_dest);
+        can_hl
     }
 
     fn get_meta_file(vault_dir: &Path) -> PathBuf {
@@ -76,6 +112,18 @@ impl VaultManager {
         profiles
     }
 
+    /// Lists cached profiles checking both game's direct drive and library
+    pub fn list_profiles_for_game(library_path: &str, game_path: &str, appid: u32) -> Vec<VaultProfile> {
+        let vault_dir = Self::get_vault_dir_for_game(library_path, game_path, appid);
+        let meta = Self::read_meta(&vault_dir);
+        let mut profiles = meta.profiles;
+        for p in &mut profiles {
+            p.is_active = meta.active_profile_id.as_deref() == Some(&p.id);
+        }
+        profiles.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        profiles
+    }
+
     /// Snapshots the currently installed game folder into the vault
     pub fn snapshot_current_build(
         library_path: &str,
@@ -85,8 +133,9 @@ impl VaultManager {
         build_id: &str,
         depot_id: &str,
         manifest_id: &str,
+        app: Option<&tauri::AppHandle>,
     ) -> Result<VaultProfile, String> {
-        let vault_dir = Self::get_vault_dir(library_path, appid);
+        let vault_dir = Self::get_vault_dir_for_game(library_path, game_path, appid);
         let game_dir = Path::new(game_path);
         if !game_dir.exists() {
             return Err(format!("Game directory not found at: {game_path}"));
@@ -106,8 +155,56 @@ impl VaultManager {
         let files_dir = target_vault_path.join("files");
         fs::create_dir_all(&files_dir).map_err(|e| format!("Failed to create vault dir: {e}"))?;
 
-        // Fast link or copy game files into vault
-        let (_count, total_bytes) = Self::sync_directory(game_dir, &files_dir, true)?;
+        // 1. Verify that zero-space hard links are supported on this volume
+        let can_hl = Self::probe_hardlinks(game_dir, &files_dir);
+        if !can_hl {
+            let _ = fs::remove_dir_all(&target_vault_path);
+            return Err(format!(
+                "Filesystem does not support zero-space hard links for {game_path}. \
+                 Version Vault requires NTFS, ext4, or Btrfs on the same volume to instantly snapshot games without copying disk data. \
+                 Please use the Backups tab instead for physical archives."
+            ));
+        }
+
+        // 2. Fast link game files into vault with progress reporting
+        let mut count = 0;
+        let mut total_bytes = 0;
+        let mut progress_cb = |c: usize, bytes: u64, file: &str| {
+            if let Some(handle) = app {
+                let _ = handle.emit(
+                    "vault_progress",
+                    VaultProgressEvent {
+                        appid,
+                        step: "snapshotting".to_string(),
+                        count: c,
+                        total_bytes: bytes,
+                        current_file: file.to_string(),
+                    },
+                );
+            }
+        };
+
+        Self::sync_directory(
+            game_dir,
+            &files_dir,
+            true,
+            &mut progress_cb,
+            &mut count,
+            &mut total_bytes,
+        )?;
+
+        if let Some(handle) = app {
+            let _ = handle.emit(
+                "vault_progress",
+                VaultProgressEvent {
+                    appid,
+                    step: "done".to_string(),
+                    count,
+                    total_bytes,
+                    current_file: String::new(),
+                },
+            );
+        }
 
         let profile = VaultProfile {
             id: profile_id.clone(),
@@ -162,7 +259,16 @@ impl VaultManager {
         fs::create_dir_all(&files_dir).map_err(|e| format!("Failed to create vault dir: {e}"))?;
 
         // Copy/link downloaded files into vault files dir
-        let (_count, total_bytes) = Self::sync_directory(content_dir, &files_dir, true)?;
+        let mut count = 0;
+        let mut total_bytes = 0;
+        Self::sync_directory(
+            content_dir,
+            &files_dir,
+            true,
+            &mut |_, _, _| {},
+            &mut count,
+            &mut total_bytes,
+        )?;
 
         let profile = VaultProfile {
             id: profile_id.clone(),
@@ -191,8 +297,9 @@ impl VaultManager {
         appid: u32,
         game_path: &str,
         target_profile_id: &str,
+        app: Option<&tauri::AppHandle>,
     ) -> Result<VaultProfile, String> {
-        let vault_dir = Self::get_vault_dir(library_path, appid);
+        let vault_dir = Self::get_vault_dir_for_game(library_path, game_path, appid);
         let mut meta = Self::read_meta(&vault_dir);
 
         let target_profile = meta
@@ -209,9 +316,18 @@ impl VaultManager {
             return Err(format!("Vault files not found at: {}", vault_files_dir.display()));
         }
 
+        // Automatically safeguard game configs and saves before switching build profiles
+        let _ = crate::backup::BackupManager::create_backup(
+            appid,
+            "Game",
+            game_path,
+            "saves",
+            None,
+            None,
+        );
+
         // 1. Clean existing game directory contents to prevent version/dll pollution,
         // then fast hardlink/copy sync: sync vault files into game directory.
-        // Using hardlinks on the same filesystem takes ~100ms and 0 extra disk space.
         if game_dir.exists() {
             if let Ok(entries) = fs::read_dir(game_dir) {
                 for entry in entries.flatten() {
@@ -225,7 +341,45 @@ impl VaultManager {
             }
         }
         let _ = fs::create_dir_all(game_dir);
-        Self::sync_directory(vault_files_dir, game_dir, true)?;
+
+        let mut count = 0;
+        let mut total_bytes = 0;
+        let mut progress_cb = |c: usize, bytes: u64, file: &str| {
+            if let Some(handle) = app {
+                let _ = handle.emit(
+                    "vault_progress",
+                    VaultProgressEvent {
+                        appid,
+                        step: "switching".to_string(),
+                        count: c,
+                        total_bytes: bytes,
+                        current_file: file.to_string(),
+                    },
+                );
+            }
+        };
+
+        Self::sync_directory(
+            vault_files_dir,
+            game_dir,
+            true,
+            &mut progress_cb,
+            &mut count,
+            &mut total_bytes,
+        )?;
+
+        if let Some(handle) = app {
+            let _ = handle.emit(
+                "vault_progress",
+                VaultProgressEvent {
+                    appid,
+                    step: "done".to_string(),
+                    count,
+                    total_bytes,
+                    current_file: String::new(),
+                },
+            );
+        }
 
         // 2. Update appmanifest_<appid>.acf so Steam recognizes this build ID and stops auto-updating
         let steamapps_dir = if Path::new(library_path).ends_with("steamapps") {
@@ -332,11 +486,29 @@ impl VaultManager {
     }
 
     /// Fast recursive directory sync using hardlinks whenever possible
-    fn sync_directory(src: &Path, dest: &Path, try_hardlinks: bool) -> Result<(usize, u64), String> {
-        let mut count = 0;
-        let mut total_bytes = 0;
+    fn sync_directory<F>(
+        src: &Path,
+        dest: &Path,
+        try_hardlinks: bool,
+        progress: &mut F,
+        count: &mut usize,
+        total_bytes: &mut u64,
+    ) -> Result<(), String>
+    where
+        F: FnMut(usize, u64, &str),
+    {
+        // Guard against symlinks and directory junctions to prevent infinite loops
+        if let Ok(meta) = src.symlink_metadata() {
+            if meta.file_type().is_symlink() {
+                return Ok(());
+            }
+        }
 
         if src.is_file() {
+            if src == dest {
+                return Ok(());
+            }
+
             if let Some(parent) = dest.parent() {
                 let _ = fs::create_dir_all(parent);
             }
@@ -346,27 +518,42 @@ impl VaultManager {
             let bytes = if try_hardlinks {
                 match fs::hard_link(src, dest) {
                     Ok(_) => src.metadata().map(|m| m.len()).unwrap_or(0),
-                    Err(_) => fs::copy(src, dest).map_err(|e| format!("Copy failed: {e}"))?,
+                    Err(_) => fs::copy(src, dest).map_err(|e| format!("Copy failed for {}: {e}", src.display()))?,
                 }
             } else {
-                fs::copy(src, dest).map_err(|e| format!("Copy failed: {e}"))?
+                fs::copy(src, dest).map_err(|e| format!("Copy failed for {}: {e}", src.display()))?
             };
-            return Ok((1, bytes));
+
+            *count += 1;
+            *total_bytes += bytes;
+
+            if *count % 50 == 0 {
+                let fname = src.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                progress(*count, *total_bytes, fname);
+            }
+
+            return Ok(());
         }
 
         if src.is_dir() {
+            let dir_name = src.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if dir_name == "version_vault" || dir_name == ".git" {
+                return Ok(());
+            }
+            if dest.starts_with(src) {
+                return Ok(());
+            }
+
             let _ = fs::create_dir_all(dest);
             let entries = fs::read_dir(src).map_err(|e| format!("Failed to read dir {}: {e}", src.display()))?;
             for entry in entries.flatten() {
                 let child_src = entry.path();
                 let child_dest = dest.join(entry.file_name());
-                let (c, b) = Self::sync_directory(&child_src, &child_dest, try_hardlinks)?;
-                count += c;
-                total_bytes += b;
+                Self::sync_directory(&child_src, &child_dest, try_hardlinks, progress, count, total_bytes)?;
             }
         }
 
-        Ok((count, total_bytes))
+        Ok(())
     }
 }
 
@@ -439,6 +626,7 @@ mod tests {
             "100",
             "12346",
             "manifest_v1",
+            None,
         )
         .unwrap();
 
@@ -457,6 +645,7 @@ mod tests {
             "200",
             "12346",
             "manifest_v2",
+            None,
         )
         .unwrap();
 
@@ -472,6 +661,7 @@ mod tests {
             12345,
             &game_dir.to_string_lossy(),
             &v1_profile.id,
+            None,
         )
         .unwrap();
 

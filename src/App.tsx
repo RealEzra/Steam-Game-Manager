@@ -173,8 +173,11 @@ export function App() {
     });
   };
 
-  const scanLibraries = async (overridePaths?: string[]) => {
-    setIsScanning(true);
+  const scanLibraries = async (overridePaths?: string[], options?: { silent?: boolean }) => {
+    const isSilent = options?.silent ?? false;
+    if (!isSilent) {
+      setIsScanning(true);
+    }
     const pathsToScan = overridePaths || customPaths;
     try {
       const result = await invoke<ScanResult>('scan_steam_games', {
@@ -193,7 +196,14 @@ export function App() {
       }
       setGames(allDiscovered);
 
-      if (result.games.length > 0) {
+      // If a game detail modal is currently open, seamlessly update its selectedGame instance
+      setSelectedGame((prev) => {
+        if (!prev) return null;
+        const updated = allDiscovered.find((g) => g.appid === prev.appid);
+        return updated || prev;
+      });
+
+      if (!isSilent && result.games.length > 0) {
         toaster.create({
           title: 'Scan Complete',
           description: `Found ${result.games.length} games across ${result.libraries.length} drives/libraries.`,
@@ -202,13 +212,17 @@ export function App() {
       }
     } catch (err) {
       console.error('Scan error:', err);
-      toaster.create({
-        title: 'Scan Error',
-        description: String(err),
-        type: 'error',
-      });
+      if (!isSilent) {
+        toaster.create({
+          title: 'Scan Error',
+          description: String(err),
+          type: 'error',
+        });
+      }
     } finally {
-      setIsScanning(false);
+      if (!isSilent) {
+        setIsScanning(false);
+      }
     }
   };
 
@@ -414,7 +428,7 @@ export function App() {
 
       {/* Main Content Area */}
       <Box flex="1" px={{ base: 4, md: 8 }} py={6}>
-        {isScanning ? (
+        {isScanning && games.length === 0 ? (
           <Flex justify="center" align="center" direction="column" minH="350px" gap={3}>
             <Spinner size="xl" color={colorHex} />
             <Text fontSize="md" fontWeight="medium">
@@ -552,7 +566,7 @@ export function App() {
         isHidden={selectedGame ? hiddenGameIds.has(selectedGame.appid) : false}
         onToggleHide={(appid) => handleToggleHide(appid)}
         initialTab={detailModalTab}
-        onRefreshGame={() => scanLibraries()}
+        onRefreshGame={() => scanLibraries(undefined, { silent: true })}
         libraries={libraries}
       />
 

@@ -208,7 +208,7 @@ export function GameCard({
             }}
           >
             <LuDownload />
-            {game.is_installed ? 'Manage & Downgrade' : 'Install Specific Version'}
+            {game.is_installed ? 'Manage & Switch Version' : 'Install Specific Version'}
           </Button>
         </Flex>
       </Box>

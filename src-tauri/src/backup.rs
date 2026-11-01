@@ -42,7 +42,8 @@ impl BackupManager {
         let common_save_names = [
             "saves", "save", "Save", "Saves", "SavedGames", "saved_games",
             "SaveData", "savedata", "UserData", "userdata", "profile", "profiles",
-            "config", "Settings", "settings",
+            "config", "Config", "configs", "Configs", "Settings", "settings",
+            "Saved", "saved", "savegames", "SaveGames",
         ];
 
         for name in common_save_names {
@@ -52,7 +53,22 @@ impl BackupManager {
             }
         }
 
-        // 2. Steam userdata folder (<steam_path>/userdata/<user_id>/<appid>)
+        // 2. Look for config files directly in game root (.ini, .cfg, .conf, .prefs)
+        if let Ok(entries) = fs::read_dir(game_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() {
+                    if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                        let ext_lower = ext.to_lowercase();
+                        if matches!(ext_lower.as_str(), "ini" | "cfg" | "conf" | "prefs" | "settings") {
+                            candidates.push(p);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Steam userdata folder (<steam_path>/userdata/<user_id>/<appid>)
         if let Some(sp) = steam_path {
             let userdata_dir = Path::new(sp).join("userdata");
             if userdata_dir.exists() {
@@ -67,7 +83,7 @@ impl BackupManager {
             }
         }
 
-        // 3. Linux Steam compatdata / Proton Wine prefix
+        // 4. Linux Steam compatdata / Proton Wine prefix
         let compatdata_dir = game_dir
             .parent() // common
             .and_then(|p| p.parent()) // steamapps
@@ -75,10 +91,61 @@ impl BackupManager {
 
         if let Some(pfx) = compatdata_dir {
             if pfx.exists() {
-                // Check users/steamuser/AppData/Local and users/steamuser/Documents
-                let appdata = pfx.join("drive_c/users/steamuser/AppData");
-                if appdata.exists() {
-                    candidates.push(appdata);
+                let appdata_local = pfx.join("drive_c/users/steamuser/AppData/Local");
+                if appdata_local.exists() {
+                    candidates.push(appdata_local);
+                }
+                let appdata_roaming = pfx.join("drive_c/users/steamuser/AppData/Roaming");
+                if appdata_roaming.exists() {
+                    candidates.push(appdata_roaming);
+                }
+                let docs = pfx.join("drive_c/users/steamuser/Documents");
+                if docs.exists() {
+                    candidates.push(docs);
+                }
+                let saved_games = pfx.join("drive_c/users/steamuser/Saved Games");
+                if saved_games.exists() {
+                    candidates.push(saved_games);
+                }
+            }
+        }
+
+        // 5. Windows user profile directories (native or via WSL)
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(userprofile) = std::env::var("USERPROFILE") {
+                let user_path = Path::new(&userprofile);
+                let my_games = user_path.join("Documents").join("My Games");
+                if my_games.exists() {
+                    candidates.push(my_games);
+                }
+                let saved_games = user_path.join("Saved Games");
+                if saved_games.exists() {
+                    candidates.push(saved_games);
+                }
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let wsl_users = Path::new("/mnt/c/Users");
+            if wsl_users.exists() {
+                if let Ok(entries) = fs::read_dir(wsl_users) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if name == "Public" || name == "Default" || name.starts_with('.') {
+                            continue;
+                        }
+                        let my_games = path.join("Documents/My Games");
+                        if my_games.exists() {
+                            candidates.push(my_games);
+                        }
+                        let saved_games = path.join("Saved Games");
+                        if saved_games.exists() {
+                            candidates.push(saved_games);
+                        }
+                    }
                 }
             }
         }
@@ -115,11 +182,24 @@ impl BackupManager {
                 }
             }
             _ => {
-                // saves only
+                // saves & configs only
                 let detected = Self::detect_save_locations(game_full_path, steam_path, appid);
                 if detected.is_empty() {
-                    // Fall back to game dir if no specific subfolder found
-                    vec![PathBuf::from(game_full_path)]
+                    // Fall back to collecting any config/save files from game root instead of copying 50GB of binaries
+                    let mut fallback = Vec::new();
+                    if let Ok(entries) = fs::read_dir(game_full_path) {
+                        for entry in entries.flatten() {
+                            let p = entry.path();
+                            if p.is_file() {
+                                if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                                    if matches!(ext.to_lowercase().as_str(), "ini" | "cfg" | "conf" | "json" | "xml" | "prefs" | "txt") {
+                                        fallback.push(p);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    fallback
                 } else {
                     detected
                 }

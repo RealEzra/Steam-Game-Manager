@@ -535,7 +535,7 @@ export function VersionBrowser({
           <Box>
             <Heading size="sm">Available Builds & Versions</Heading>
             <Text fontSize="xs" color="fg.muted">
-              Select a version below to downgrade Depot {activeDepot}.
+              Select a version below to install or switch Depot {activeDepot}.
             </Text>
           </Box>
 
@@ -996,7 +996,7 @@ export function VersionBrowser({
                       )}
                       {isSelected && !isCurrent && (
                         <Badge size="xs" colorPalette={palette} variant="solid">
-                          Target Downgrade
+                          Target Version
                         </Badge>
                       )}
                       {ver.isCanonical && !isImported && !isLocal && (

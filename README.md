@@ -8,15 +8,15 @@ Built with **Tauri v2 (Rust)**, **React 19**, **TypeScript**, and **Chakra UI v3
 
 ## Key Features
 
-- **🔄 Version Rollbacks & Downgrading**:
-  - Roll back any Steam game to previous depot manifests to preserve mod compatibility (e.g. F4SE, SKSE, classic mod collections) or run speedrunning branches.
-  - Generates ready-to-use commands for both **DepotDownloader** and the built-in **Steam Console** (`download_depot <appid> <depot> <manifest>`).
-  - Automatically identifies downloaded content folders and applies them directly into your game's installation directory.
+- **🔄 Version Management & Build Switching (3 Flexible Modes)**:
+  - **⚡ Automated 1-Click Version Switch**: Built-in DepotDownloader runner that automatically creates pre-change snapshots in the Version Vault, streams live download percentages and transfer speeds (MB/s), handles Steam Guard 2FA & password prompts in-app, applies files directly, caches the new build into the Version Vault, and locks the Steam manifest.
+  - **🎮 Official Steam Console**: Launches the built-in Steam client console (`steam://open/console`) with ready-to-paste commands (`download_depot <appid> <depot> <manifest>`) for users who prefer using their native Steam client.
+  - **💻 Manual DepotDownloader CLI**: Generates full command-line arguments (`DepotDownloader -app ... -depot ... -manifest ... -validate`) for external terminals or scripting.
 
-- **⚡ Version Vault (Instant Build Switching)**:
-  - Take snapshots of your installed game builds and store them in an isolated local Vault.
-  - Switch between different versions/branches (e.g., *Fallout 4 Pre-Next-Gen* vs *Next-Gen Update 2*) with a single click in seconds—zero re-downloading required.
-  - Automatically patches Steam client state flags (`appmanifest_<appid>.acf`) to stop Steam from auto-updating your rolled-back games.
+- **⚡ Version Vault (Instant Hardlink Build Switching)**:
+  - Automatically snapshots both your pre-change and newly installed builds into an isolated local Vault on the same drive partition.
+  - Consecutive downloads build a version history automatically—switch between any previously downloaded build in under 200ms with **0 extra disk space** using filesystem hardlinks.
+  - Automatically synchronizes and locks Steam manifest flags (`appmanifest_<appid>.acf`) to stop Steam from auto-updating your chosen build.
 
 - **🌐 SteamDB Integration & Smart Patch Matching**:
   - **1-Click Clipboard Parser**: Copy a manifest table from SteamDB and click "Auto-Import" to populate all available versions and release dates.
@@ -24,8 +24,9 @@ Built with **Tauri v2 (Rust)**, **React 19**, **TypeScript**, and **Chakra UI v3
   - **Same-Day Revision Estimations**: If multiple manifests were released on the same day, the app assigns revision tags (`Rev 1`, `Rev 2 / Hotfix`) to keep your builds organized.
   - **Multilingual Script Filtering**: Filters out third-party RSS syndications (e.g. foreign gaming blogs) and matches patch notes in your preferred language.
 
-- **💾 Game & Save Backup Manager**:
-  - Create manual or pre-downgrade snapshots of your game installations and save files.
+- **💾 Game & Save Backup Manager (Disaster Recovery & Archives)**:
+  - Create independent deep-copy archives of your save files, `.ini` configuration settings, or complete game directories.
+  - Stored in an external backup directory that safely persists even if a game is completely uninstalled from Steam.
   - Restore backups at any time with full size and file-count metrics.
 
 - **🗂️ Universal Drive & Library Scanner**:
