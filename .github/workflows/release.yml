@@ -52,7 +52,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: 'Steam Game Manager v__VERSION__'
-          releaseBody: 'See changelog for details.'
+          releaseBody: 'See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full release details.'
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
