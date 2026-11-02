@@ -281,29 +281,40 @@ fn delete_vault_profile(
 
 #[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let resolved_path = if p.is_relative() {
+        if let Ok(abs) = std::fs::canonicalize(p) {
+            abs.to_string_lossy().to_string()
+        } else {
+            path.clone()
+        }
+    } else {
+        path.clone()
+    };
+
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
-            .arg(&path)
+            .arg(&resolved_path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&path)
+            .arg(&resolved_path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
         if std::path::Path::new("/mnt/c/Windows/explorer.exe").exists() {
-            let win_path = if path.starts_with("/mnt/") && path.len() >= 7 {
-                let drive_letter = path.chars().nth(5).unwrap_or('c').to_ascii_uppercase();
-                let sub_path = &path[6..].replace('/', "\\");
+            let win_path = if resolved_path.starts_with("/mnt/") && resolved_path.len() >= 7 {
+                let drive_letter = resolved_path.chars().nth(5).unwrap_or('c').to_ascii_uppercase();
+                let sub_path = &resolved_path[6..].replace('/', "\\");
                 format!("{drive_letter}:{sub_path}")
             } else {
-                path.clone()
+                resolved_path.clone()
             };
             if std::process::Command::new("/mnt/c/Windows/explorer.exe")
                 .arg(&win_path)
@@ -314,7 +325,7 @@ fn open_folder(path: String) -> Result<(), String> {
             }
         }
         std::process::Command::new("xdg-open")
-            .arg(&path)
+            .arg(&resolved_path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }

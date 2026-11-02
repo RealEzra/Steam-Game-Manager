@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.3] - 2026-11-01
+
+### Fixed
+- **Windows Save Backup Folder Resolution**:
+  - Fixed game save backups on Windows falling back to relative `./backups` which caused Windows Explorer to launch the user's `Documents` folder instead of the actual backup location.
+  - Now uses `%LOCALAPPDATA%\steam-game-manager\backups\` (with canonical absolute path resolution in `open_folder`).
+- **Pre-Switch Safety Snapshot Manifest ID**:
+  - Fixed pre-switch snapshots incorrectly saving under the incoming target manifest ID instead of the build/manifest currently installed on disk at the time of backup.
+- **Duplicate Save Backups**:
+  - Eliminated redundant secondary save backup triggered inside `VaultManager::switch_profile`, ensuring clean single backups per version change.
+- **DepotDownloader Error Diagnostics**:
+  - Enhanced error capture when DepotDownloader exits with non-zero status, surfacing the exact terminal output/diagnostics in the UI banner.
+
+---
+
 ## [0.9.2] - 2026-11-01
 
 ### Added

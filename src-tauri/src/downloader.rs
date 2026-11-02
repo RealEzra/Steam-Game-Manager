@@ -42,6 +42,8 @@ pub struct AutomatedDowngradeOptions {
     pub appid: u32,
     pub depot_id: String,
     pub manifest_id: String,
+    pub current_manifest_id: Option<String>,
+    pub current_build_id: Option<String>,
     pub game_path: String,
     pub steam_path: Option<String>,
     pub library_path: Option<String>,
@@ -482,15 +484,25 @@ impl DownloaderManager {
 
                 // 2. Snapshot current build in Version Vault so user can revert instantly
                 if let Some(lib_path) = &options.library_path {
-                    let backup_label = format!("Pre-Version Change Snapshot (Manifest {})", manifest_id);
+                    let cur_manifest = options
+                        .current_manifest_id
+                        .as_deref()
+                        .filter(|m| !m.is_empty() && *m != "unknown")
+                        .unwrap_or("current");
+                    let cur_build = options
+                        .current_build_id
+                        .as_deref()
+                        .filter(|b| !b.is_empty() && *b != "0")
+                        .unwrap_or("current");
+                    let backup_label = format!("Pre-Switch Snapshot (Manifest {})", cur_manifest);
                     let _ = crate::vault::VaultManager::snapshot_current_build(
                         lib_path,
                         appid,
                         &options.game_path,
                         &backup_label,
-                        "current",
+                        cur_build,
                         &depot_id,
-                        &manifest_id,
+                        cur_manifest,
                         Some(&app_clone),
                     );
                 }
@@ -565,11 +577,25 @@ impl DownloaderManager {
                 st.child_stdin = stdin;
             }
 
+            // Shared buffer to capture the most recent error/diagnostic output lines from DepotDownloader
+            let last_output_lines = Arc::new(Mutex::new(Vec::<String>::new()));
+            let last_output_clone = Arc::clone(&last_output_lines);
+
+            let record_output = |lines_buf: &Arc<Mutex<Vec<String>>>, line: &str| {
+                if let Ok(mut buf) = lines_buf.lock() {
+                    if buf.len() >= 8 {
+                        buf.remove(0);
+                    }
+                    buf.push(line.to_string());
+                }
+            };
+
             // Spawn stderr reader thread to catch any errors or prompts
             if let Some(mut stderr) = child.stderr.take() {
                 let app_err = app_clone.clone();
                 let depot_id_err = depot_id.clone();
                 let manifest_id_err = manifest_id.clone();
+                let last_out_err = Arc::clone(&last_output_lines);
                 std::thread::spawn(move || {
                     let mut err_buf = [0u8; 1024];
                     while let Ok(n) = stderr.read(&mut err_buf) {
@@ -579,6 +605,12 @@ impl DownloaderManager {
                         let err_text = String::from_utf8_lossy(&err_buf[..n]);
                         let trimmed = err_text.trim();
                         if !trimmed.is_empty() {
+                            if let Ok(mut buf) = last_out_err.lock() {
+                                if buf.len() >= 8 {
+                                    buf.remove(0);
+                                }
+                                buf.push(trimmed.to_string());
+                            }
                             let lower = trimmed.to_lowercase();
                             let step = if lower.contains("steam guard")
                                 || lower.contains("two-factor")
@@ -643,6 +675,8 @@ impl DownloaderManager {
                         if line.is_empty() {
                             continue;
                         }
+
+                        record_output(&last_output_clone, &line);
 
                         let lower = line.to_lowercase();
 
@@ -790,10 +824,19 @@ impl DownloaderManager {
                     );
                 }
                 Ok(exit_status) => {
+                    let err_detail = if let Ok(buf) = last_output_lines.lock() {
+                        if !buf.is_empty() {
+                            format!("\nDetails: {}", buf.join("\n"))
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
                     emit_progress(
                         "error",
                         0.0,
-                        &format!("DepotDownloader finished with non-zero exit code: {exit_status}"),
+                        &format!("DepotDownloader finished with non-zero exit code: {exit_status}{err_detail}"),
                         None,
                     );
                 }

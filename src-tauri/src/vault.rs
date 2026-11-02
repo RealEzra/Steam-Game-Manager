@@ -370,16 +370,6 @@ impl VaultManager {
             return Err(format!("Vault files not found at: {}", vault_files_dir.display()));
         }
 
-        // Automatically safeguard game configs and saves before switching build profiles
-        let _ = crate::backup::BackupManager::create_backup(
-            appid,
-            "Game",
-            game_path,
-            "saves",
-            None,
-            None,
-        );
-
         // 1. Clean up only files from the previous profile that do not belong to the target profile
         // instead of indiscriminately wiping the entire game folder!
         // Steam games consist of multiple depots (e.g. 50MB exe depot + 40GB data/textures/sounds depot).

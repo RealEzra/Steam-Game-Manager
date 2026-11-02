@@ -23,10 +23,17 @@ impl BackupManager {
     pub fn get_backups_root() -> PathBuf {
         let base = if let Ok(custom) = std::env::var("STEAM_DOWNGRADER_BACKUP_DIR") {
             PathBuf::from(custom)
+        } else if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            PathBuf::from(local_app_data).join("steam-game-manager").join("backups")
+        } else if let Ok(app_data) = std::env::var("APPDATA") {
+            PathBuf::from(app_data).join("steam-game-manager").join("backups")
         } else if let Ok(home) = std::env::var("HOME") {
-            PathBuf::from(home).join(".local/share/steam-downgrader-gui/backups")
+            PathBuf::from(home).join(".local/share/steam-game-manager/backups")
         } else {
-            PathBuf::from("./backups")
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("backups")))
+                .unwrap_or_else(|| PathBuf::from("./backups"))
         };
 
         let _ = fs::create_dir_all(&base);

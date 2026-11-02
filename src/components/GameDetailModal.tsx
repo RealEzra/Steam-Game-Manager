@@ -310,6 +310,8 @@ export function GameDetailModal({
           appid: game.appid,
           depot_id: activeDepot,
           manifest_id: manifestId.trim(),
+          current_manifest_id: game.mounted_depots[activeDepot] || null,
+          current_build_id: game.build_id || null,
           game_path: effectiveGamePath,
           steam_path: steamPath,
           library_path: targetLibrary || game.library_path,
