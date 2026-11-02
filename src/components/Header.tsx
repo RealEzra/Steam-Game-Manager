@@ -8,7 +8,7 @@ import {
   Text,
 } from '@chakra-ui/react';
 import { ColorModeButton } from '@/components/ui/color-mode';
-import { LuFolderSync, LuHardDrive, LuSettings } from 'react-icons/lu';
+import { LuBookOpen, LuFolderSync, LuHardDrive, LuSettings } from 'react-icons/lu';
 import { useAppAccent } from '@/utils/theme';
 
 interface HeaderProps {
@@ -18,6 +18,7 @@ interface HeaderProps {
   isScanning: boolean;
   onScan: () => void;
   onOpenSettings: () => void;
+  onOpenChangelog?: () => void;
 }
 
 export function Header({
@@ -27,6 +28,7 @@ export function Header({
   isScanning,
   onScan,
   onOpenSettings,
+  onOpenChangelog,
 }: HeaderProps) {
   const { palette } = useAppAccent();
 
@@ -90,6 +92,16 @@ export function Header({
         </HStack>
 
         <HStack gap={2} wrap="wrap">
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label="Changelog"
+            onClick={onOpenChangelog}
+          >
+            <LuBookOpen />
+            Changelog
+          </Button>
+
           <Button
             size="sm"
             variant="subtle"

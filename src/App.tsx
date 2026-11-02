@@ -19,6 +19,7 @@ import { GameCard } from '@/components/GameCard';
 import { GameRow } from '@/components/GameRow';
 import { GameDetailModal } from '@/components/GameDetailModal';
 import { SettingsModal } from '@/components/SettingsModal';
+import { ChangelogModal } from '@/components/ChangelogModal';
 import { ContextMenu, ContextMenuState } from '@/components/ContextMenu';
 import { FolderBrowserModal } from '@/components/FolderBrowserModal';
 import { AddGameModal } from '@/components/AddGameModal';
@@ -26,6 +27,9 @@ import { toaster } from '@/components/ui/toaster';
 import { ScanResult, SteamGame, SteamLibrary } from '@/types';
 import { isGameVisible } from '@/utils/filterGames';
 import { checkUpdate } from '@/utils/updater';
+import { downloadTracker } from '@/utils/downloadTracker';
+import { listen } from '@tauri-apps/api/event';
+import { DepotDownloadProgressEvent } from '@/types';
 import { LuFolderPlus, LuFolderSync, LuGamepad2, LuHardDrive } from 'react-icons/lu';
 
 export function App() {
@@ -94,6 +98,7 @@ export function App() {
   const [selectedGame, setSelectedGame] = useState<SteamGame | null>(null);
   const [detailModalTab, setDetailModalTab] = useState<'downgrade' | 'vault' | 'backups' | 'info'>('downgrade');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isChangelogOpen, setIsChangelogOpen] = useState(false);
   const [isFolderBrowserOpen, setIsFolderBrowserOpen] = useState(false);
   const [isAddGameOpen, setIsAddGameOpen] = useState(false);
 
@@ -235,6 +240,63 @@ export function App() {
     }, 3500);
 
     return () => clearTimeout(timer);
+  }, []);
+
+  // Global event listener for depot downloads to keep track across background/closed modals
+  const selectedGameRef = useRef<SteamGame | null>(null);
+  selectedGameRef.current = selectedGame;
+
+  const gamesRef = useRef<SteamGame[]>([]);
+  gamesRef.current = games;
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<DepotDownloadProgressEvent>('depot_download_progress', (ev) => {
+      const p = ev.payload;
+      downloadTracker.updateProgress(p);
+
+      const targetGame = gamesRef.current.find((g) => g.appid === p.appid);
+      const gameTitle = targetGame ? targetGame.name : `AppID ${p.appid}`;
+
+      if (p.step === 'finished') {
+        scanLibraries(undefined, { silent: true });
+        toaster.create({
+          title: 'Version Switch Complete!',
+          description: `${gameTitle} (Depot ${p.depot_id}) is ready to play.`,
+          type: 'success',
+          action: {
+            label: 'View Details',
+            onClick: () => {
+              const currentG = gamesRef.current.find((g) => g.appid === p.appid);
+              if (currentG) {
+                handleOpenGame(currentG, 'downgrade');
+              }
+            },
+          },
+        });
+      } else if (p.step === 'error') {
+        toaster.create({
+          title: `Version Switch Error - ${gameTitle}`,
+          description: p.message,
+          type: 'error',
+          action: {
+            label: 'Open Details',
+            onClick: () => {
+              const currentG = gamesRef.current.find((g) => g.appid === p.appid);
+              if (currentG) {
+                handleOpenGame(currentG, 'downgrade');
+              }
+            },
+          },
+        });
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, []);
 
   // Track appids that we've already attempted to resolve this session to avoid redundant queries
@@ -398,6 +460,7 @@ export function App() {
         isScanning={isScanning}
         onScan={() => scanLibraries()}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenChangelog={() => setIsChangelogOpen(true)}
       />
 
       {/* Filter and View Options */}
@@ -589,6 +652,13 @@ export function App() {
         onRescan={() => scanLibraries()}
         gridSize={gridSize}
         onGridSizeChange={handleGridSizeChange}
+        onOpenChangelog={() => setIsChangelogOpen(true)}
+      />
+
+      {/* Changelog Modal */}
+      <ChangelogModal
+        isOpen={isChangelogOpen}
+        onClose={() => setIsChangelogOpen(false)}
       />
 
       {/* Folder Browser Modal */}

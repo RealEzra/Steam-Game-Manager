@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.4] - 2026-11-02
+
+### Added
+- **📋 Live GitHub Changelog Viewer**:
+  - Integrated in-app changelog modal with live syncing directly from GitHub (`CHANGELOG.md`) and local fallback when offline.
+  - Searchable release notes with categorized changes, release dates, and structured sub-bulleted details.
+  - Direct access buttons added to the header navigation and the Settings modal.
+- **🔍 Detailed In-App Update Notes**:
+  - Automatically fetches and displays formatted release notes for incoming updates directly in the Settings update banner, replacing generic release notes with full changelog items.
+- **📜 Persistent DepotDownloader Output & Full Log Viewer**:
+  - Logs now persist across version switch completion, failure, and dialog closing.
+  - Added an expandable terminal log box with line counts and a copyable log feed.
+- **🔄 Background Version Switching**:
+  - Modal dialog can be safely closed during downloads without interrupting tasks.
+  - App-wide background completion and error toast alerts with direct 1-click "View Details" navigation.
+- **🎨 Refreshed App Branding & Icons**:
+  - Updated app icon with a sleek matte chassis, chamfered rim, and modern solid white monogram typography.
+
+---
+
 ## [0.9.3] - 2026-11-01
 
 ### Fixed

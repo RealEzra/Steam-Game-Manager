@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { toaster } from '@/components/ui/toaster';
 import {
+  LuBookOpen,
   LuCheck,
   LuCloudDownload,
   LuFolder,
@@ -53,6 +54,7 @@ interface SettingsModalProps {
   onRescan: () => void;
   gridSize?: GridSize;
   onGridSizeChange?: (size: GridSize) => void;
+  onOpenChangelog?: () => void;
 }
 
 export function SettingsModal({
@@ -65,6 +67,7 @@ export function SettingsModal({
   onRescan,
   gridSize = 'medium',
   onGridSizeChange,
+  onOpenChangelog,
 }: SettingsModalProps) {
   const [newPath, setNewPath] = useState('');
   const [isFolderBrowserOpen, setIsFolderBrowserOpen] = useState(false);
@@ -428,22 +431,43 @@ export function SettingsModal({
 
                 {updateState.status === 'available' && (
                   <Box
-                    p={3}
+                    p={3.5}
                     mb={3}
                     rounded="lg"
                     bg={`${palette}.500/10`}
                     borderWidth="1px"
                     borderColor={`${palette}.500/30`}
                   >
-                    <HStack justify="space-between" mb={1}>
+                    <HStack justify="space-between" mb={2}>
                       <Text fontSize="xs" fontWeight="bold" color={`${palette}.400`}>
                         Version {updateState.newVersion} Available!
                       </Text>
+                      {onOpenChangelog && (
+                        <Button
+                          size="2xs"
+                          variant="ghost"
+                          onClick={onOpenChangelog}
+                        >
+                          <LuBookOpen /> View All Changes
+                        </Button>
+                      )}
                     </HStack>
                     {updateState.releaseNotes && (
-                      <Text fontSize="2xs" color="fg.muted" mb={2}>
+                      <Box
+                        maxH="180px"
+                        overflowY="auto"
+                        bg="bg.panel"
+                        p={2.5}
+                        rounded="md"
+                        fontSize="2xs"
+                        whiteSpace="pre-wrap"
+                        color="fg"
+                        borderWidth="1px"
+                        borderColor="border.subtle"
+                        mb={3}
+                      >
                         {updateState.releaseNotes}
-                      </Text>
+                      </Box>
                     )}
                     <Button
                       size="xs"
@@ -489,7 +513,17 @@ export function SettingsModal({
                   </HStack>
                 )}
 
-                <Flex justify="flex-end">
+                <Flex justify="space-between" align="center" mt={1}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      onOpenChangelog?.();
+                    }}
+                  >
+                    <LuBookOpen /> View Full Changelog
+                  </Button>
+
                   <Button
                     size="xs"
                     variant="subtle"

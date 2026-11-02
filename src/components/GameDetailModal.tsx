@@ -23,6 +23,8 @@ import { toaster } from '@/components/ui/toaster';
 import {
   LuArchive,
   LuCheck,
+  LuChevronDown,
+  LuChevronUp,
   LuCopy,
   LuDownload,
   LuExternalLink,
@@ -39,10 +41,12 @@ import {
   LuRotateCcw,
   LuShieldCheck,
   LuSparkles,
+  LuTerminal,
   LuTrash2,
   LuX,
   LuZap,
 } from 'react-icons/lu';
+import { downloadTracker } from '@/utils/downloadTracker';
 import {
   BackupEntry,
   BuildVersion,
@@ -53,7 +57,6 @@ import {
 } from '@/types';
 import { copyToClipboard, formatBytes, formatDate } from '@/utils/format';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { VersionBrowser } from './VersionBrowser';
 import { VaultBrowser } from './VaultBrowser';
 import { getDepotLabel, useGameManifestStats } from '@/utils/knownVersions';
@@ -121,6 +124,8 @@ export function GameDetailModal({
   const [isInstallingTool, setIsInstallingTool] = useState(false);
   const [isDowngrading, setIsDowngrading] = useState(false);
   const [activeDowngrade, setActiveDowngrade] = useState<DepotDownloadProgressEvent | null>(null);
+  const [sessionLogs, setSessionLogs] = useState<string[]>([]);
+  const [showFullLogs, setShowFullLogs] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [isSubmitting2fa, setIsSubmitting2fa] = useState(false);
   const [showAdvancedAuth, setShowAdvancedAuth] = useState(false);
@@ -291,8 +296,7 @@ export function GameDetailModal({
       } catch {}
     }
 
-    setIsDowngrading(true);
-    setActiveDowngrade({
+    const initialProgress: DepotDownloadProgressEvent = {
       appid: game.appid,
       depot_id: activeDepot,
       manifest_id: manifestId.trim(),
@@ -302,7 +306,11 @@ export function GameDetailModal({
       speed_mb_s: null,
       bytes_downloaded: null,
       total_bytes: null,
-    });
+    };
+
+    setIsDowngrading(true);
+    setActiveDowngrade(initialProgress);
+    downloadTracker.startDownload(game.appid, initialProgress);
 
     try {
       await invoke('start_automated_downgrade', {
@@ -399,40 +407,29 @@ export function GameDetailModal({
     }
   }, [isOpen]);
 
+  // Synchronize state with downloadTracker so downloads persist across closing/reopening dialog
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<DepotDownloadProgressEvent>('depot_download_progress', (ev) => {
-      const p = ev.payload;
-      if (p.appid === game?.appid && p.depot_id === activeDepot) {
-        setActiveDowngrade(p);
-        if (p.step === 'finished') {
-          setIsDowngrading(false);
-          toaster.create({
-            title: 'Version Switch Complete!',
-            description: `Successfully downloaded, backed up, and applied depot ${p.depot_id}.`,
-            type: 'success',
-          });
-          loadBackups();
-          onRefreshGame?.();
-        } else if (p.step === 'error') {
-          setIsDowngrading(false);
-          toaster.create({
-            title: 'Version Switch Error',
-            description: p.message,
-            type: 'error',
-          });
-        } else if (p.step === 'cancelled') {
-          setIsDowngrading(false);
-        }
-      }
-    }).then((fn) => {
-      unlisten = fn;
+    if (!game) return;
+
+    const syncFromTracker = () => {
+      const state = downloadTracker.getState(game.appid);
+      setIsDowngrading(state.isDowngrading);
+      setActiveDowngrade(state.activeDowngrade);
+      setSessionLogs(state.logs);
+    };
+
+    // Initial sync
+    syncFromTracker();
+
+    // Subscribe to ongoing updates
+    const unsubscribe = downloadTracker.subscribe(() => {
+      syncFromTracker();
     });
 
     return () => {
-      if (unlisten) unlisten();
+      unsubscribe();
     };
-  }, [game?.appid, activeDepot]);
+  }, [game?.appid]);
 
   const handleApplyDownloadedDepot = async () => {
     if (!steamPath) {
@@ -1020,20 +1017,36 @@ export function GameDetailModal({
                         Automatically backs up game configs and saves, creates a pre-switch Vault snapshot, downloads depot chunks, applies files to your game folder, saves the new build into Version Vault, and locks the Steam manifest.
                       </Text>
 
-                      {/* Download In-Progress Live Status Card */}
-                      {isDowngrading && activeDowngrade && (
+                      {/* Download Live Status Card & Persistent Logs */}
+                      {activeDowngrade && (
                         <Box
                           p={3.5}
                           mb={3}
                           rounded="lg"
                           bg="bg.panel"
                           borderWidth="1px"
-                          borderColor={colorHex}
+                          borderColor={
+                            activeDowngrade.step === 'error'
+                              ? 'red.500'
+                              : activeDowngrade.step === 'finished'
+                              ? 'green.500'
+                              : colorHex
+                          }
                           animation="scale-fade-in 0.15s ease-out"
                         >
                           <Flex justify="space-between" align="center" mb={2}>
                             <HStack gap={2}>
-                              <Badge colorPalette={palette} size="xs" variant="solid">
+                              <Badge
+                                colorPalette={
+                                  activeDowngrade.step === 'error'
+                                    ? 'red'
+                                    : activeDowngrade.step === 'finished'
+                                    ? 'green'
+                                    : palette
+                                }
+                                size="xs"
+                                variant="solid"
+                              >
                                 {activeDowngrade.step.toUpperCase()}
                               </Badge>
                               <Text fontSize="xs" fontWeight="semibold">
@@ -1051,7 +1064,7 @@ export function GameDetailModal({
                             </HStack>
 
                             <HStack gap={3}>
-                              {activeDowngrade.speed_mb_s && (
+                              {activeDowngrade.speed_mb_s && isDowngrading && (
                                 <Text fontSize="xs" fontWeight="bold" color={colorHex}>
                                   {activeDowngrade.speed_mb_s.toFixed(1)} MB/s
                                 </Text>
@@ -1066,16 +1079,59 @@ export function GameDetailModal({
                           <Box w="100%" h="7px" bg="bg.muted" rounded="full" overflow="hidden" mb={2}>
                             <Box
                               h="100%"
-                              bg={colorHex}
+                              bg={
+                                activeDowngrade.step === 'error'
+                                  ? 'red.500'
+                                  : activeDowngrade.step === 'finished'
+                                  ? 'green.500'
+                                  : colorHex
+                              }
                               rounded="full"
                               transition="width 0.25s ease"
                               style={{ width: `${Math.min(100, Math.max(0, activeDowngrade.percent))}%` }}
                             />
                           </Box>
 
-                          <Text fontSize="2xs" color="fg.muted" truncate mb={2} title={activeDowngrade.message}>
-                            {activeDowngrade.message}
-                          </Text>
+                          {/* Most recent log line */}
+                          <Flex justify="space-between" align="center" gap={2} mb={2}>
+                            <Text fontSize="2xs" color="fg.muted" truncate flex="1" title={activeDowngrade.message}>
+                              {activeDowngrade.message || 'Waiting for output...'}
+                            </Text>
+
+                            <Button
+                              size="2xs"
+                              variant="ghost"
+                              onClick={() => setShowFullLogs(!showFullLogs)}
+                            >
+                              <LuTerminal size={12} />
+                              {showFullLogs ? 'Hide Full Log' : `Expand Full Log (${sessionLogs.length})`}
+                              {showFullLogs ? <LuChevronUp size={12} /> : <LuChevronDown size={12} />}
+                            </Button>
+                          </Flex>
+
+                          {/* Expandable Full Logs Box */}
+                          {showFullLogs && (
+                            <Box
+                              maxH="220px"
+                              overflowY="auto"
+                              bg="blackAlpha.700"
+                              p={2.5}
+                              rounded="md"
+                              fontFamily="mono"
+                              fontSize="2xs"
+                              whiteSpace="pre-wrap"
+                              color="green.300"
+                              borderWidth="1px"
+                              borderColor="border.subtle"
+                              mb={2}
+                            >
+                              {sessionLogs.length > 0 ? (
+                                sessionLogs.join('\n')
+                              ) : (
+                                <Text color="fg.muted">No log lines recorded yet.</Text>
+                              )}
+                            </Box>
+                          )}
 
                           {/* Password Input Prompt */}
                           {activeDowngrade.step === 'needs_password' && (
@@ -1147,15 +1203,25 @@ export function GameDetailModal({
                             </Box>
                           )}
 
-                          <Flex justify="flex-end" mt={2}>
-                            <Button
-                              size="xs"
-                              variant="outline"
-                              colorPalette="red"
-                              onClick={handleCancelDowngrade}
-                            >
-                              <LuX /> Cancel Download
-                            </Button>
+                          <Flex justify="flex-end" gap={2} mt={2}>
+                            {isDowngrading ? (
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                colorPalette="red"
+                                onClick={handleCancelDowngrade}
+                              >
+                                <LuX /> Cancel Download
+                              </Button>
+                            ) : (
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() => downloadTracker.clearSession(game.appid)}
+                              >
+                                Dismiss Status
+                              </Button>
+                            )}
                           </Flex>
                         </Box>
                       )}

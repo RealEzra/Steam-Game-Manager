@@ -1,66 +1,44 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <!-- Dark Gaming Chassis Background Gradient -->
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0a0d14"/>
-      <stop offset="40%" stop-color="#101524"/>
-      <stop offset="100%" stop-color="#161b2e"/>
-    </linearGradient>
-
-    <!-- Vibrant Cyberpunk Neon Border Gradient -->
-    <linearGradient id="neonRim" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00f2fe"/>
-      <stop offset="35%" stop-color="#0072ff"/>
-      <stop offset="70%" stop-color="#7928ca"/>
-      <stop offset="100%" stop-color="#ff0080"/>
-    </linearGradient>
-
-    <!-- Monogram Fill Gradient (Cyan -> Blue -> Purple -> Pink) -->
-    <linearGradient id="emblemGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00f2fe"/>
-      <stop offset="30%" stop-color="#0080ff"/>
-      <stop offset="65%" stop-color="#7928ca"/>
-      <stop offset="100%" stop-color="#ff0080"/>
-    </linearGradient>
-
-    <!-- Internal Radial Glow -->
-    <radialGradient id="ambientGlow" cx="50%" cy="50%" r="55%">
-      <stop offset="0%" stop-color="#0072ff" stop-opacity="0.25"/>
-      <stop offset="50%" stop-color="#7928ca" stop-opacity="0.12"/>
-      <stop offset="100%" stop-color="#0a0d14" stop-opacity="0"/>
+    <!-- Matte dark chassis -->
+    <radialGradient id="bgMatte" cx="50%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#1e222d"/>
+      <stop offset="60%" stop-color="#12151c"/>
+      <stop offset="100%" stop-color="#0a0c10"/>
     </radialGradient>
 
-    <!-- Glowing Drop Shadow Filter -->
-    <filter id="neonShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0072ff" flood-opacity="0.5"/>
-      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#ff0080" flood-opacity="0.35"/>
+    <!-- Subtle precision border highlight -->
+    <linearGradient id="edgeBorder" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.6"/>
+    </linearGradient>
+
+    <!-- Clean, crisp drop shadow for the monogram -->
+    <filter id="cleanShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000000" flood-opacity="0.6"/>
     </filter>
   </defs>
 
-  <!-- 1. Background Squircle Canvas -->
-  <rect width="512" height="512" rx="116" fill="url(#bgGrad)"/>
+  <!-- 1. Sleek Squircle Chassis -->
+  <rect width="512" height="512" rx="116" fill="url(#bgMatte)"/>
 
-  <!-- 2. Ambient Center Glow -->
-  <circle cx="256" cy="256" r="220" fill="url(#ambientGlow)"/>
+  <!-- 2. Precision Chamfer Outer Rim -->
+  <rect x="5" y="5" width="502" height="502" rx="112" fill="none" stroke="url(#edgeBorder)" stroke-width="2.5"/>
+  <rect x="14" y="14" width="484" height="484" rx="103" fill="none" stroke="#000000" stroke-width="1.5" stroke-opacity="0.8"/>
 
-  <!-- 3. Outer Neon Accent Border -->
-  <rect x="7" y="7" width="498" height="498" rx="110" fill="none" stroke="url(#neonRim)" stroke-width="4" stroke-opacity="0.75"/>
-
-  <!-- 4. Subtle Inner Inset Bevel -->
-  <rect x="15" y="15" width="482" height="482" rx="102" fill="none" stroke="#ffffff" stroke-width="1.2" stroke-opacity="0.08"/>
-
-  <!-- 5. Top Controller / Steam Valve D-Pad Accent (Pure Paths) -->
-  <g transform="translate(256, 110)" fill="url(#emblemGrad)" opacity="0.9">
-    <rect x="-4" y="-14" width="8" height="28" rx="3"/>
-    <rect x="-14" y="-4" width="28" height="8" rx="3"/>
-    <circle cx="-28" cy="0" r="3.5" opacity="0.6"/>
-    <circle cx="28" cy="0" r="3.5" opacity="0.6"/>
+  <!-- 3. Minimalist Controller D-Pad Accent -->
+  <g transform="translate(256, 112)" fill="#38bdf8" opacity="0.9">
+    <rect x="-3" y="-12" width="6" height="24" rx="3"/>
+    <rect x="-12" y="-3" width="24" height="6" rx="3"/>
+    <circle cx="-24" cy="0" r="2.5" fill="#94a3b8" opacity="0.5"/>
+    <circle cx="24" cy="0" r="2.5" fill="#94a3b8" opacity="0.5"/>
   </g>
 
-  <!-- 6. Stylized "GM" Vector Monogram -->
-  <g filter="url(#neonShadow)">
+  <!-- 4. Modern Solid Monogram "GM" (Crisp Pure White / Off-White, No Gradient) -->
+  <g filter="url(#cleanShadow)">
     <!-- Letter "G" -->
-    <path fill="url(#emblemGrad)" d="
+    <path fill="#ffffff" d="
       M 216 160
       C 152 160, 102 206, 102 266
       C 102 326, 152 372, 216 372
@@ -78,7 +56,7 @@
     "/>
 
     <!-- Letter "M" -->
-    <path fill="url(#emblemGrad)" d="
+    <path fill="#ffffff" d="
       M 304 372
       L 338 160
       L 374 256
@@ -92,11 +70,10 @@
     "/>
   </g>
 
-  <!-- 7. Bottom Gaming Chevron Bar (Pure Vector Shapes) -->
-  <g transform="translate(256, 412)" fill="url(#emblemGrad)" opacity="0.85">
-    <path d="M -70 0 L -40 10 L -40 4 L -65 -4 Z" opacity="0.5"/>
-    <path d="M -30 0 L 0 10 L 0 4 L -25 -4 Z" opacity="0.8"/>
-    <path d="M 30 0 L 0 10 L 0 4 L 25 -4 Z" opacity="0.8"/>
-    <path d="M 70 0 L 40 10 L 40 4 L 65 -4 Z" opacity="0.5"/>
+  <!-- 5. Sleek Sub-Accent Bar -->
+  <g transform="translate(256, 408)" fill="#38bdf8" opacity="0.85">
+    <circle cx="-24" cy="0" r="3" fill="#94a3b8" opacity="0.4"/>
+    <rect x="-14" y="-2" width="28" height="4" rx="2" fill="#38bdf8"/>
+    <circle cx="24" cy="0" r="3" fill="#94a3b8" opacity="0.4"/>
   </g>
 </svg>

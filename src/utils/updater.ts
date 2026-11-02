@@ -1,6 +1,7 @@
 import { check, Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { toaster } from '@/components/ui/toaster';
+import { getChangelog, getVersionChanges } from '@/utils/changelog';
 
 export type UpdateStatus =
   | 'idle'
@@ -16,6 +17,7 @@ export interface UpdateState {
   currentVersion: string;
   newVersion?: string;
   releaseNotes?: string;
+  changelogText?: string;
   downloadProgress: number; // 0 to 100
   downloadedBytes: number;
   totalBytes: number;
@@ -45,10 +47,24 @@ export async function checkUpdate(
     }
 
     activeUpdate = update;
+
+    // Fetch the detailed changelog to replace generic "See CHANGELOG.md" release message
+    let changelogNote = update.body || undefined;
+    try {
+      const { versions } = await getChangelog();
+      const versionEntry = getVersionChanges(versions, update.version);
+      if (versionEntry && versionEntry.rawText) {
+        changelogNote = versionEntry.rawText;
+      }
+    } catch (err) {
+      console.warn('Could not load detailed changelog for update:', err);
+    }
+
     onStateChange?.({
       status: 'available',
       newVersion: update.version,
-      releaseNotes: update.body || undefined,
+      releaseNotes: changelogNote,
+      changelogText: changelogNote,
     });
 
     toaster.create({
