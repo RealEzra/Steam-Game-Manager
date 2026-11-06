@@ -473,26 +473,16 @@ fn app_window_toggle_maximize(window: tauri::Window) -> Result<bool, String> {
         };
 
         if let Some(monitor) = target_monitor {
-            let m_pos = monitor.position();
-            let m_size = monitor.size();
+            let wa = monitor.work_area();
+            let wa_pos = &wa.position;
+            let wa_size = &wa.size;
 
-            // On secondary monitors (or under WSLg/Weston compositor), calling native maximize causes
-            // the window manager to ignore the secondary screen and throw the window onto the primary display.
-            // Explicitly setting the position and size to match monitor bounds keeps it reliably on the current screen.
-            let is_secondary = m_pos.x != 0 || m_pos.y != 0;
-
-            if is_secondary {
-                let _ = window.set_position(tauri::Position::Physical(*m_pos));
-                let _ = window.set_size(tauri::Size::Physical(*m_size));
-                if let Ok(mut guard) = IS_CUSTOM_MAXIMIZED.lock() {
-                    *guard = true;
-                }
-                return Ok(true);
-            } else {
-                let _ = window.set_position(tauri::Position::Physical(*m_pos));
-                window.maximize().map_err(|e| e.to_string())?;
-                return Ok(true);
+            let _ = window.set_position(tauri::Position::Physical(*wa_pos));
+            let _ = window.set_size(tauri::Size::Physical(*wa_size));
+            if let Ok(mut guard) = IS_CUSTOM_MAXIMIZED.lock() {
+                *guard = true;
             }
+            return Ok(true);
         }
 
         window.maximize().map_err(|e| e.to_string())?;
