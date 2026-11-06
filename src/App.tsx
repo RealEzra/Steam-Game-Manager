@@ -20,6 +20,7 @@ import { GameRow } from '@/components/GameRow';
 import { GameDetailModal } from '@/components/GameDetailModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { ChangelogModal } from '@/components/ChangelogModal';
+import { StorageManagerModal } from '@/components/StorageManagerModal';
 import { ContextMenu, ContextMenuState } from '@/components/ContextMenu';
 import { FolderBrowserModal } from '@/components/FolderBrowserModal';
 import { AddGameModal } from '@/components/AddGameModal';
@@ -99,6 +100,7 @@ export function App() {
   const [detailModalTab, setDetailModalTab] = useState<'downgrade' | 'vault' | 'backups' | 'info'>('downgrade');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
+  const [isStorageManagerOpen, setIsStorageManagerOpen] = useState(false);
   const [isFolderBrowserOpen, setIsFolderBrowserOpen] = useState(false);
   const [isAddGameOpen, setIsAddGameOpen] = useState(false);
 
@@ -231,8 +233,13 @@ export function App() {
     }
   };
 
+  const hasInitialScannedRef = useRef(false);
+
   useEffect(() => {
-    scanLibraries();
+    if (!hasInitialScannedRef.current) {
+      hasInitialScannedRef.current = true;
+      scanLibraries();
+    }
 
     // Check for app updates silently in background on startup
     const timer = setTimeout(() => {
@@ -461,6 +468,7 @@ export function App() {
         onScan={() => scanLibraries()}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenChangelog={() => setIsChangelogOpen(true)}
+        onOpenStorageManager={() => setIsStorageManagerOpen(true)}
       />
 
       {/* Filter and View Options */}
@@ -659,6 +667,16 @@ export function App() {
       <ChangelogModal
         isOpen={isChangelogOpen}
         onClose={() => setIsChangelogOpen(false)}
+      />
+
+      {/* Storage & Snapshot Manager Modal */}
+      <StorageManagerModal
+        isOpen={isStorageManagerOpen}
+        onClose={() => setIsStorageManagerOpen(false)}
+        games={games}
+        libraries={libraries}
+        onOpenGame={handleOpenGame}
+        onRefreshData={() => scanLibraries(undefined, { silent: true })}
       />
 
       {/* Folder Browser Modal */}

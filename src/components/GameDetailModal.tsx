@@ -35,6 +35,8 @@ import {
   LuFolderSync,
   LuInfo,
   LuKey,
+  LuLock,
+  LuLockOpen,
   LuPlay,
   LuPlus,
   LuRefreshCw,
@@ -43,6 +45,7 @@ import {
   LuSparkles,
   LuTerminal,
   LuTrash2,
+  LuTriangleAlert,
   LuX,
   LuZap,
 } from 'react-icons/lu';
@@ -133,6 +136,8 @@ export function GameDetailModal({
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const [isApplyingDepot, setIsApplyingDepot] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isManifestLocked, setIsManifestLocked] = useState(false);
+  const [isTogglingLock, setIsTogglingLock] = useState(false);
 
   // Backups State
   const [backups, setBackups] = useState<BackupEntry[]>([]);
@@ -140,6 +145,8 @@ export function GameDetailModal({
   const [customBackupPath, setCustomBackupPath] = useState('');
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isRestoringId, setIsRestoringId] = useState<string | null>(null);
+  const [lastBackupResult, setLastBackupResult] = useState<BackupEntry | null>(null);
+  const [showBackupNotice, setShowBackupNotice] = useState(false);
 
   // Load backups for this game
   const loadBackups = async () => {
@@ -153,6 +160,51 @@ export function GameDetailModal({
     }
   };
 
+  // Check if appmanifest is set to Read-Only
+  const checkManifestLock = async () => {
+    if (!game?.library_path) return;
+    try {
+      const locked = await invoke<boolean>('is_manifest_locked', {
+        libraryPath: targetLibrary || game.library_path,
+        appid: game.appid,
+      });
+      setIsManifestLocked(locked);
+    } catch {
+      setIsManifestLocked(false);
+    }
+  };
+
+  const handleToggleManifestLock = async () => {
+    if (!game?.library_path) return;
+    setIsTogglingLock(true);
+    const nextLockState = !isManifestLocked;
+    try {
+      await invoke('set_manifest_locked', {
+        libraryPath: targetLibrary || game.library_path,
+        appid: game.appid,
+        lock: nextLockState,
+      });
+      setIsManifestLocked(nextLockState);
+      toaster.create({
+        title: nextLockState ? 'Steam Updates Locked (Read-Only)' : 'Steam Updates Unlocked',
+        description: nextLockState
+          ? `appmanifest_${game.appid}.acf is marked Read-Only. Steam cannot overwrite or update your game files.`
+          : `appmanifest_${game.appid}.acf is writable. Steam can update normally when requested.`,
+        type: nextLockState ? 'success' : 'info',
+        duration: 6000,
+      });
+    } catch (err) {
+      toaster.create({
+        title: 'Could not toggle manifest lock',
+        description: String(err),
+        type: 'error',
+        duration: 6000,
+      });
+    } finally {
+      setIsTogglingLock(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen && game) {
       const initialDepot = depotKeys.length > 0 ? depotKeys[0] : String(game.appid);
@@ -163,6 +215,7 @@ export function GameDetailModal({
       setTargetLibrary(game.library_path || (libraries.length > 0 ? libraries[0].path : 'SteamLibrary'));
       setCurrentTab(initialTab);
       loadBackups();
+      checkManifestLock();
     }
   }, [isOpen, game?.appid, initialTab]);
 
@@ -543,10 +596,19 @@ export function GameDetailModal({
         customPath: backupType === 'custom' ? customBackupPath : null,
         steamPath,
       });
+
+      setLastBackupResult(backup);
+      setShowBackupNotice(true);
+
+      const sourcesList = backup.backed_up_sources && backup.backed_up_sources.length > 0
+        ? `Found ${backup.backed_up_sources.length} location(s): ${backup.backed_up_sources.map(s => s.split(/[/\\]/).pop()).join(', ')}`
+        : 'Checked game folder & user profiles';
+
       toaster.create({
-        title: 'Backup Created',
-        description: `Saved ${backup.files_count} files (${formatBytes(backup.size_bytes)})`,
-        type: 'success',
+        title: backup.files_count > 0 ? 'Backup Created' : 'Backup Created (0 Files Detected)',
+        description: `Archived ${backup.files_count} files (${formatBytes(backup.size_bytes)}). ${sourcesList}`,
+        type: backup.files_count > 0 ? 'success' : 'warning',
+        duration: 8000,
       });
       await loadBackups();
     } catch (err) {
@@ -554,6 +616,7 @@ export function GameDetailModal({
         title: 'Backup Failed',
         description: String(err),
         type: 'error',
+        duration: 8000,
       });
     } finally {
       setIsBackingUp(false);
@@ -622,7 +685,7 @@ export function GameDetailModal({
       scrollBehavior="inside"
     >
       <DialogContent
-        maxW="980px"
+        maxW="1020px"
         w="95vw"
         maxH="88vh"
         h="88vh"
@@ -633,7 +696,7 @@ export function GameDetailModal({
         flexDirection="column"
       >
         {/* Hero Header with Artwork */}
-        <Box position="relative" height="180px" minH="180px" flexShrink={0} overflow="hidden" bg="gray.950">
+        <Box position="relative" height="200px" minH="200px" flexShrink={0} overflow="hidden" bg="gray.950">
           <img
             src={game.hero_image || game.header_image}
             alt={game.name}
@@ -669,9 +732,11 @@ export function GameDetailModal({
             right={6}
             justify="space-between"
             align="flex-end"
+            gap={4}
+            wrap="nowrap"
           >
-            <Box>
-              <HStack gap={2} mb={1}>
+            <Box minW={0} flex="1">
+              <HStack gap={2} mb={1.5} wrap="wrap">
                 <Badge colorPalette={palette} variant="solid" size="sm">
                   AppID: {game.appid}
                 </Badge>
@@ -704,13 +769,39 @@ export function GameDetailModal({
                     Hidden
                   </Badge>
                 )}
+                {game.is_installed && (
+                  <Badge
+                    colorPalette={isManifestLocked ? 'yellow' : 'gray'}
+                    variant={isManifestLocked ? 'solid' : 'subtle'}
+                    size="sm"
+                    cursor="pointer"
+                    onClick={handleToggleManifestLock}
+                    title={isManifestLocked ? 'Updates Locked: appmanifest is Read-Only. Click to unlock.' : 'Updates Unlocked: Click to lock appmanifest (Read-Only).'}
+                  >
+                    {isManifestLocked ? <LuLock style={{ display: 'inline', marginRight: 4 }} /> : <LuLockOpen style={{ display: 'inline', marginRight: 4 }} />}
+                    {isManifestLocked ? 'Updates Locked' : 'Updates Allowed'}
+                  </Badge>
+                )}
               </HStack>
-              <Heading size="2xl" color="white" textShadow="0 2px 4px rgba(0,0,0,0.8)">
+              <Heading size="2xl" color="white" textShadow="0 2px 4px rgba(0,0,0,0.8)" truncate title={game.name}>
                 {game.name}
               </Heading>
             </Box>
 
-            <HStack gap={2}>
+            <HStack gap={2} flexShrink={0} wrap="wrap" justify="flex-end" maxW="480px">
+              {game.is_installed && (
+                <Button
+                  size="sm"
+                  variant={isManifestLocked ? 'solid' : 'subtle'}
+                  colorPalette={isManifestLocked ? 'yellow' : 'gray'}
+                  loading={isTogglingLock}
+                  onClick={handleToggleManifestLock}
+                  title={isManifestLocked ? 'Unlock appmanifest_<appid>.acf (Allows Steam updates)' : 'Lock appmanifest_<appid>.acf as Read-Only (Blocks Steam updates)'}
+                >
+                  {isManifestLocked ? <LuLock /> : <LuLockOpen />}
+                  {isManifestLocked ? 'Unlock Updates' : 'Lock Updates'}
+                </Button>
+              )}
               {game.is_installed && (
                 <Button
                   size="sm"
@@ -729,7 +820,7 @@ export function GameDetailModal({
                 onClick={() => onToggleHide(game.appid)}
               >
                 {isHidden ? <LuEye /> : <LuEyeOff />}
-                {isHidden ? 'Unhide Game' : 'Hide Game'}
+                {isHidden ? 'Unhide' : 'Hide'}
               </Button>
               <Button
                 size="sm"
@@ -1533,9 +1624,29 @@ export function GameDetailModal({
                   <Heading size="sm" mb={2}>
                     Backup Game Files & Save Data
                   </Heading>
-                  <Text fontSize="xs" color="fg.muted" mb={4}>
+                  <Text fontSize="xs" color="fg.muted" mb={3}>
                     Create a standalone backup before switching game versions or testing mods.
                   </Text>
+
+                  {/* Informational Callout / Warning on how Save Detection Works */}
+                  <Box
+                    p={3}
+                    mb={4}
+                    rounded="lg"
+                    bg="orange.500/10"
+                    borderWidth="1px"
+                    borderColor="orange.500/30"
+                  >
+                    <HStack gap={2} mb={1}>
+                      <LuTriangleAlert size={14} color="#f97316" />
+                      <Text fontSize="xs" fontWeight="bold" color="orange.400">
+                        Save Location Notice
+                      </Text>
+                    </HStack>
+                    <Text fontSize="2xs" color="fg.muted">
+                      Every game stores saves differently (Documents, AppData, Steam Userdata, or the game folder). The automated scanner checks standard locations. If your game stores saves in a custom directory, please use <strong>Custom Path</strong> below to ensure your files are captured.
+                    </Text>
+                  </Box>
 
                   <Flex gap={2.5} mb={4} wrap="wrap">
                     <Button
@@ -1587,6 +1698,53 @@ export function GameDetailModal({
                     </Button>
                   </Flex>
                 </Box>
+
+                {/* Post-Backup Summary / Details Callout */}
+                {showBackupNotice && lastBackupResult && (
+                  <Box
+                    p={3.5}
+                    rounded="xl"
+                    borderWidth="1px"
+                    borderColor={lastBackupResult.files_count > 0 ? 'green.500/40' : 'orange.500/40'}
+                    bg={lastBackupResult.files_count > 0 ? 'green.500/10' : 'orange.500/10'}
+                  >
+                    <Flex justify="space-between" align="center" mb={1.5}>
+                      <HStack gap={2}>
+                        <LuCheck color={lastBackupResult.files_count > 0 ? '#22c55e' : '#f97316'} />
+                        <Text fontSize="xs" fontWeight="bold">
+                          {lastBackupResult.files_count > 0 ? 'Backup Finished' : 'Backup Created (0 Files Detected)'}
+                        </Text>
+                      </HStack>
+                      <Button size="2xs" variant="ghost" onClick={() => setShowBackupNotice(false)}>
+                        <LuX size={12} />
+                      </Button>
+                    </Flex>
+                    <Text fontSize="2xs" color="fg.muted" mb={2}>
+                      Archived {lastBackupResult.files_count} files ({formatBytes(lastBackupResult.size_bytes)}) to:{' '}
+                      <Code fontSize="2xs">{lastBackupResult.backup_path}</Code>
+                    </Text>
+
+                    {lastBackupResult.backed_up_sources && lastBackupResult.backed_up_sources.length > 0 ? (
+                      <Box>
+                        <Text fontSize="2xs" fontWeight="semibold" mb={1}>
+                          Captured Sources ({lastBackupResult.backed_up_sources.length}):
+                        </Text>
+                        <VStack gap={1} align="stretch">
+                          {lastBackupResult.backed_up_sources.map((src, idx) => (
+                            <HStack key={idx} gap={2} fontSize="2xs" color="fg.muted">
+                              <Text color={colorHex}>•</Text>
+                              <Text truncate title={src}>{src}</Text>
+                            </HStack>
+                          ))}
+                        </VStack>
+                      </Box>
+                    ) : (
+                      <Text fontSize="2xs" color="orange.400">
+                        No standard save or config folders were detected in default locations. If your game keeps saves in AppData or Documents, consider selecting "Custom Path".
+                      </Text>
+                    )}
+                  </Box>
+                )}
 
                 {/* Backups List */}
                 <Box>

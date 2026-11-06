@@ -14,6 +14,7 @@ pub struct BackupEntry {
     pub size_bytes: u64,
     pub created_at: String,
     pub files_count: usize,
+    pub backed_up_sources: Option<Vec<String>>,
 }
 
 pub struct BackupManager;
@@ -120,6 +121,7 @@ impl BackupManager {
         // 5. Windows user profile directories (native or via WSL)
         #[cfg(target_os = "windows")]
         {
+            let folder_stem = game_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if let Ok(userprofile) = std::env::var("USERPROFILE") {
                 let user_path = Path::new(&userprofile);
                 let my_games = user_path.join("Documents").join("My Games");
@@ -131,10 +133,32 @@ impl BackupManager {
                     candidates.push(saved_games);
                 }
             }
+
+            // Also check LocalAppData and AppData for game-specific save folders
+            if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+                let local_path = Path::new(&localappdata);
+                if !folder_stem.is_empty() {
+                    let game_local = local_path.join(folder_stem);
+                    if game_local.exists() {
+                        candidates.push(game_local);
+                    }
+                }
+            }
+
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                let roaming_path = Path::new(&appdata);
+                if !folder_stem.is_empty() {
+                    let game_roaming = roaming_path.join(folder_stem);
+                    if game_roaming.exists() {
+                        candidates.push(game_roaming);
+                    }
+                }
+            }
         }
 
         #[cfg(target_os = "linux")]
         {
+            let folder_stem = game_dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
             let wsl_users = Path::new("/mnt/c/Users");
             if wsl_users.exists() {
                 if let Ok(entries) = fs::read_dir(wsl_users) {
@@ -151,6 +175,17 @@ impl BackupManager {
                         let saved_games = path.join("Saved Games");
                         if saved_games.exists() {
                             candidates.push(saved_games);
+                        }
+
+                        if !folder_stem.is_empty() {
+                            let local_app = path.join("AppData/Local").join(folder_stem);
+                            if local_app.exists() {
+                                candidates.push(local_app);
+                            }
+                            let roaming_app = path.join("AppData/Roaming").join(folder_stem);
+                            if roaming_app.exists() {
+                                candidates.push(roaming_app);
+                            }
                         }
                     }
                 }
@@ -215,12 +250,14 @@ impl BackupManager {
 
         let mut total_bytes = 0u64;
         let mut total_files = 0usize;
+        let mut recorded_sources = Vec::new();
 
         for src in &source_paths {
             if !src.exists() {
                 continue;
             }
 
+            recorded_sources.push(src.to_string_lossy().to_string());
             let folder_name = src.file_name().unwrap_or_default();
             let dest = app_backup_dir.join(folder_name);
 
@@ -239,6 +276,7 @@ impl BackupManager {
             size_bytes: total_bytes,
             created_at: timestamp_str,
             files_count: total_files,
+            backed_up_sources: Some(recorded_sources),
         };
 
         // Save metadata file

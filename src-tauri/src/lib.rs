@@ -202,6 +202,11 @@ fn list_vault_profiles(library_path: String, appid: u32, game_path: Option<Strin
 }
 
 #[tauri::command]
+fn list_all_vault_profiles(libraries: Vec<String>) -> Vec<VaultProfile> {
+    VaultManager::list_all_vault_profiles(&libraries)
+}
+
+#[tauri::command]
 async fn snapshot_current_build(
     app: tauri::AppHandle,
     library_path: String,
@@ -507,6 +512,16 @@ fn app_window_is_maximized(window: tauri::Window) -> Result<bool, String> {
     Ok(custom_max || native_max)
 }
 
+#[tauri::command]
+fn is_manifest_locked(library_path: String, appid: u32) -> Result<bool, String> {
+    SteamManager::is_manifest_locked(&library_path, appid)
+}
+
+#[tauri::command]
+fn set_manifest_locked(library_path: String, appid: u32, lock: bool) -> Result<bool, String> {
+    SteamManager::set_manifest_locked(&library_path, appid, lock)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -553,6 +568,7 @@ pub fn run() {
             get_downloaded_depot_path,
             apply_downloaded_depot,
             list_vault_profiles,
+            list_all_vault_profiles,
             snapshot_current_build,
             import_downloaded_to_vault,
             switch_build_profile,
@@ -563,7 +579,9 @@ pub fn run() {
             app_window_minimize,
             app_window_toggle_maximize,
             app_window_close,
-            app_window_is_maximized
+            app_window_is_maximized,
+            is_manifest_locked,
+            set_manifest_locked
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -25,6 +25,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.5] - 2026-11-05
+
+### Added
+- **💾 Global Storage & Snapshot Manager**:
+  - Centralized dashboard accessible from the top header to inspect storage across all Steam library drives.
+  - Lists and manages both Version Vault profiles and standalone game save backups in one place.
+  - Search and filter items with 1-click folder opening in system file explorer, direct game jump, and deletion.
+- **🔒 Steam Manifest Auto-Update Lock**:
+  - Added a 1-click read-only toggle on the \`appmanifest_<appid>.acf\` file directly from the Game Detail modal.
+  - Displays real-time lock status badge and protects downgraded game installations from being silently overwritten by Steam updates.
+- **⏱️ Measured Version Switching Duration**:
+  - Replaced static placeholder timings in version switch toast notifications with real high-resolution elapsed execution time.
+  - Increased notification toast duration to 7 seconds so users can comfortably read the switch summary.
+- **🛡️ Expanded Game Save Location Detection**:
+  - Broadened save backup discovery to scan \`%LOCALAPPDATA%\\<GameDir>\` and \`%APPDATA%\\<GameDir>\` on Windows, as well as their Proton wine prefix counterparts on Linux.
+  - Added an in-app transparency callout explaining save backup mechanics and caveat notifications.
+  - Added a post-backup summary card detailing the exact discovered and archived source paths.
+
+### Fixed
+- **📐 Game Detail Modal Header Layout**:
+  - Fixed action buttons colliding with information chips and the hide button getting cut off by enlarging header height and wrapping actions into a structured responsive layout.
+- **⚡ Redundant Initial Startup Scan**:
+  - Eliminated duplicate scan triggered during application launch under React StrictMode.
+
+---
+
 ## [0.9.4] - 2026-11-02
 
 ### Added

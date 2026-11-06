@@ -77,7 +77,7 @@ export function SettingsModal({
 
   const [updateState, setUpdateState] = useState<UpdateState>({
     status: 'idle',
-    currentVersion: '0.9.1',
+    currentVersion: '0.9.5',
     downloadProgress: 0,
     downloadedBytes: 0,
     totalBytes: 0,

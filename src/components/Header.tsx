@@ -8,7 +8,7 @@ import {
   Text,
 } from '@chakra-ui/react';
 import { ColorModeButton } from '@/components/ui/color-mode';
-import { LuBookOpen, LuFolderSync, LuHardDrive, LuSettings } from 'react-icons/lu';
+import { LuBookOpen, LuFolderSync, LuHardDrive, LuLayers, LuSettings } from 'react-icons/lu';
 import { useAppAccent } from '@/utils/theme';
 
 interface HeaderProps {
@@ -19,6 +19,7 @@ interface HeaderProps {
   onScan: () => void;
   onOpenSettings: () => void;
   onOpenChangelog?: () => void;
+  onOpenStorageManager?: () => void;
 }
 
 export function Header({
@@ -29,6 +30,7 @@ export function Header({
   onScan,
   onOpenSettings,
   onOpenChangelog,
+  onOpenStorageManager,
 }: HeaderProps) {
   const { palette } = useAppAccent();
 
@@ -92,6 +94,17 @@ export function Header({
         </HStack>
 
         <HStack gap={2} wrap="wrap">
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label="Storage Manager"
+            onClick={onOpenStorageManager}
+            title="Manage Vault profiles and backups across all games"
+          >
+            <LuLayers />
+            Storage
+          </Button>
+
           <Button
             size="sm"
             variant="ghost"

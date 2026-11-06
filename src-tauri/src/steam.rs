@@ -1692,6 +1692,45 @@ impl SteamManager {
             game_dir.display()
         ))
     }
+
+    /// Resolves the appmanifest path for a game in a library
+    pub fn get_appmanifest_path(library_path: &str, appid: u32) -> PathBuf {
+        let lib = Path::new(library_path);
+        let steamapps_dir = if lib.ends_with("steamapps") {
+            lib.to_path_buf()
+        } else {
+            lib.join("steamapps")
+        };
+        steamapps_dir.join(format!("appmanifest_{appid}.acf"))
+    }
+
+    /// Checks if appmanifest_<appid>.acf is marked Read-Only
+    pub fn is_manifest_locked(library_path: &str, appid: u32) -> Result<bool, String> {
+        let manifest_path = Self::get_appmanifest_path(library_path, appid);
+        if !manifest_path.exists() {
+            return Ok(false);
+        }
+        let metadata = fs::metadata(&manifest_path)
+            .map_err(|e| format!("Failed to inspect manifest permissions: {e}"))?;
+        Ok(metadata.permissions().readonly())
+    }
+
+    /// Toggles the Read-Only lock state on appmanifest_<appid>.acf
+    pub fn set_manifest_locked(library_path: &str, appid: u32, lock: bool) -> Result<bool, String> {
+        let manifest_path = Self::get_appmanifest_path(library_path, appid);
+        if !manifest_path.exists() {
+            return Err(format!("Manifest file not found: {}", manifest_path.display()));
+        }
+
+        let metadata = fs::metadata(&manifest_path)
+            .map_err(|e| format!("Failed to read manifest metadata: {e}"))?;
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(lock);
+        fs::set_permissions(&manifest_path, permissions)
+            .map_err(|e| format!("Failed to update manifest permissions: {e}"))?;
+
+        Ok(lock)
+    }
 }
 
 #[cfg(test)]

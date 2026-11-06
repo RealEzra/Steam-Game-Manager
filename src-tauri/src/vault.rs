@@ -8,6 +8,7 @@ use tauri::Emitter;
 pub struct VaultProfile {
     pub id: String,
     pub appid: u32,
+    pub game_name: Option<String>,
     pub version_name: String,
     pub build_id: String,
     pub depot_id: String,
@@ -16,6 +17,7 @@ pub struct VaultProfile {
     pub is_active: bool,
     pub created_at: u64,
     pub size_bytes: u64,
+    pub library_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,9 +163,48 @@ impl VaultManager {
         let mut profiles = meta.profiles;
         for p in &mut profiles {
             p.is_active = meta.active_profile_id.as_deref() == Some(&p.id);
+            if p.library_path.is_none() {
+                p.library_path = Some(library_path.to_string());
+            }
         }
         profiles.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         profiles
+    }
+
+    /// Lists all cached profiles across all games and library paths
+    pub fn list_all_vault_profiles(libraries: &[String]) -> Vec<VaultProfile> {
+        let mut all_profiles = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for lib_path in libraries {
+            let lib = Path::new(lib_path);
+            let steamapps = if lib.ends_with("steamapps") {
+                lib.to_path_buf()
+            } else {
+                lib.join("steamapps")
+            };
+            let vault_root = steamapps.join("version_vault");
+            if let Ok(app_entries) = fs::read_dir(&vault_root) {
+                for app_entry in app_entries.flatten() {
+                    let path = app_entry.path();
+                    if path.is_dir() {
+                        let meta = Self::read_meta(&path);
+                        for mut p in meta.profiles {
+                            if seen_ids.insert(p.id.clone()) {
+                                p.is_active = meta.active_profile_id.as_deref() == Some(&p.id);
+                                if p.library_path.is_none() {
+                                    p.library_path = Some(lib_path.clone());
+                                }
+                                all_profiles.push(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        all_profiles.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        all_profiles
     }
 
     /// Lists cached profiles checking both game's direct drive and library
@@ -263,6 +304,7 @@ impl VaultManager {
         let profile = VaultProfile {
             id: profile_id.clone(),
             appid,
+            game_name: None,
             version_name: version_name.to_string(),
             build_id: build_id.to_string(),
             depot_id: depot_id.to_string(),
@@ -271,6 +313,7 @@ impl VaultManager {
             is_active: true,
             created_at: now,
             size_bytes: total_bytes,
+            library_path: Some(library_path.to_string()),
         };
 
         let mut meta = Self::read_meta(&vault_dir);
@@ -327,6 +370,7 @@ impl VaultManager {
         let profile = VaultProfile {
             id: profile_id.clone(),
             appid,
+            game_name: None,
             version_name: version_name.to_string(),
             build_id: build_id.to_string(),
             depot_id: depot_id.to_string(),
@@ -335,6 +379,7 @@ impl VaultManager {
             is_active: false,
             created_at: now,
             size_bytes: total_bytes,
+            library_path: Some(library_path.to_string()),
         };
 
         let mut meta = Self::read_meta(&vault_dir);
@@ -462,7 +507,7 @@ impl VaultManager {
         Ok(updated)
     }
 
-    /// Deletes a profile from the vault
+    /// Deletes a profile from the vault, probing both library and direct vault directory
     pub fn delete_profile(library_path: &str, appid: u32, profile_id: &str) -> Result<(), String> {
         let vault_dir = Self::get_vault_dir(library_path, appid);
         let mut meta = Self::read_meta(&vault_dir);
@@ -470,6 +515,16 @@ impl VaultManager {
         let profile_dir = vault_dir.join(profile_id);
         if profile_dir.exists() {
             let _ = fs::remove_dir_all(&profile_dir);
+        }
+
+        // Also check if profile had a custom vault path outside the default library path
+        if let Some(target) = meta.profiles.iter().find(|p| p.id == profile_id) {
+            let custom_path = Path::new(&target.vault_path);
+            if let Some(parent) = custom_path.parent() {
+                if parent.exists() && parent != vault_dir {
+                    let _ = fs::remove_dir_all(parent);
+                }
+            }
         }
 
         meta.profiles.retain(|p| p.id != profile_id);

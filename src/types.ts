@@ -39,6 +39,7 @@ export interface BackupEntry {
   size_bytes: number;
   created_at: string;
   files_count: number;
+  backed_up_sources?: string[];
 }
 
 export interface DowngradePlan {
@@ -92,6 +93,7 @@ export interface DirectoryListing {
 export interface VaultProfile {
   id: string;
   appid: number;
+  game_name?: string;
   version_name: string;
   build_id: string;
   depot_id: string;
@@ -100,6 +102,7 @@ export interface VaultProfile {
   is_active: boolean;
   created_at: number;
   size_bytes: number;
+  library_path?: string;
 }
 
 export interface DepotDownloaderStatus {

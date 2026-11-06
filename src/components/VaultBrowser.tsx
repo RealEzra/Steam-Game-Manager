@@ -181,6 +181,7 @@ export function VaultBrowser({
 
   const handleSwitchProfile = async (profile: VaultProfile) => {
     setIsSwitchingId(profile.id);
+    const startTime = performance.now();
     try {
       const updated = await invoke<VaultProfile>('switch_build_profile', {
         libraryPath: game.library_path,
@@ -189,19 +190,27 @@ export function VaultBrowser({
         targetProfileId: profile.id,
       });
 
+      const elapsedMs = Math.round(performance.now() - startTime);
+      const timeDisplay = elapsedMs < 1000 ? `${elapsedMs}ms` : `${(elapsedMs / 1000).toFixed(1)}s`;
+
       toaster.create({
-        title: 'Build Switched in ~100ms!',
+        title: `Build Switched in ${timeDisplay}!`,
         description: `Active build is now ${updated.version_name} (Build ${updated.build_id}). Steam auto-update locked.`,
         type: 'success',
+        duration: 7000,
       });
 
       await loadProfiles();
-      onProfileSwitched?.();
+      // Delay parent background library scan slightly so toast animation has time to display
+      setTimeout(() => {
+        onProfileSwitched?.();
+      }, 100);
     } catch (err) {
       toaster.create({
         title: 'Failed to Switch Build',
         description: String(err),
         type: 'error',
+        duration: 7000,
       });
     } finally {
       setIsSwitchingId(null);
