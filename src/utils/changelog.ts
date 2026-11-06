@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.6] - 2026-11-05
+
+### Added
+- **🛑 Pre-Flight Disk Space Verification**:
+  - Automatically queries available free space on the destination drive before launching DepotDownloader.
+  - Compares free space against estimated game installation size from \`appmanifest\` metadata, aborting early with an informative alert if the disk is full.
+- **⚡ Zero-Overhead Same-Drive Staging Application**:
+  - Switched downloaded staging file application from disk-heavy full duplication to same-volume atomic moves and file replacements.
+  - Eliminates the need for 2× disk headroom during version installation and automatically purges temporary staging folders once applied.
+
+### Fixed
+- **🖥️ Windows Maximized Window Taskbar Occlusion & Edge Gaps**:
+  - Bound custom window toggle maximize to \`monitor.work_area()\` coordinates instead of total display bounds, ensuring the maximized window stays cleanly above the taskbar with zero edge gaps.
+- **🏷️ Windows Executable & Shortcut Product Name**:
+  - Updated \`productName\` in Tauri configuration to display cleanly as **Steam Game Manager** across Windows Search, Start menu, and Desktop shortcuts.
+
+---
+
 ## [0.9.5] - 2026-11-05
 
 ### Added

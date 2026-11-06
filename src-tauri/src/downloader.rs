@@ -19,6 +19,122 @@ pub fn create_hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
+/// Returns the free disk space in bytes for the volume hosting the given path.
+pub fn get_available_disk_space(path: &Path) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+
+        type LPCWSTR = *const u16;
+        type PULARGE_INTEGER = *mut u64;
+        type BOOL = i32;
+
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetDiskFreeSpaceExW(
+                lpDirectoryName: LPCWSTR,
+                lpFreeBytesAvailableToCaller: PULARGE_INTEGER,
+                lpTotalNumberOfBytes: PULARGE_INTEGER,
+                lpTotalNumberOfFreeBytes: PULARGE_INTEGER,
+            ) -> BOOL;
+        }
+
+        // If path does not exist yet, find its nearest existing parent
+        let mut check_path = path.to_path_buf();
+        while !check_path.exists() {
+            if let Some(parent) = check_path.parent() {
+                check_path = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+
+        let wide_path: Vec<u16> = OsStr::new(&check_path)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let mut free_available: u64 = 0;
+        let mut total_bytes: u64 = 0;
+        let mut total_free: u64 = 0;
+
+        let success = unsafe {
+            GetDiskFreeSpaceExW(
+                wide_path.as_ptr(),
+                &mut free_available as PULARGE_INTEGER,
+                &mut total_bytes as PULARGE_INTEGER,
+                &mut total_free as PULARGE_INTEGER,
+            )
+        };
+
+        if success != 0 {
+            Some(free_available)
+        } else {
+            None
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        #[repr(C)]
+        struct StatVfs {
+            f_bsize: libc_ulong,
+            f_frsize: libc_ulong,
+            f_blocks: libc_fsblkcnt_t,
+            f_bfree: libc_fsblkcnt_t,
+            f_bavail: libc_fsblkcnt_t,
+            f_files: libc_fsfilcnt_t,
+            f_ffree: libc_fsfilcnt_t,
+            f_favail: libc_fsfilcnt_t,
+            f_fsid: libc_ulong,
+            f_flag: libc_ulong,
+            f_namemax: libc_ulong,
+            __f_spare: [std::ffi::c_int; 6],
+        }
+
+        #[allow(non_camel_case_types)]
+        type libc_ulong = std::ffi::c_ulong;
+        #[allow(non_camel_case_types)]
+        type libc_fsblkcnt_t = std::ffi::c_ulong;
+        #[allow(non_camel_case_types)]
+        type libc_fsfilcnt_t = std::ffi::c_ulong;
+
+        unsafe extern "C" {
+            fn statvfs(path: *const std::ffi::c_char, buf: *mut StatVfs) -> std::ffi::c_int;
+        }
+
+        let mut check_path = path.to_path_buf();
+        while !check_path.exists() {
+            if let Some(parent) = check_path.parent() {
+                check_path = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+
+        if let Ok(c_path) = CString::new(check_path.as_os_str().as_bytes()) {
+            let mut stat: StatVfs = unsafe { std::mem::zeroed() };
+            let res = unsafe { statvfs(c_path.as_ptr(), &mut stat) };
+            if res == 0 {
+                let block_size = if stat.f_frsize != 0 {
+                    stat.f_frsize
+                } else {
+                    stat.f_bsize
+                };
+                Some((stat.f_bavail as u64) * (block_size as u64))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DowngradePlan {
     pub appid: u32,
@@ -381,18 +497,37 @@ impl DownloaderManager {
     }
 
     pub fn copy_recursive(src: &Path, dest: &Path) -> Result<(), String> {
+        Self::apply_recursive(src, dest, false)
+    }
+
+    /// Moves or copies files from staging to target game directory.
+    /// When `move_files` is true, tries `fs::rename` first (0 extra disk space on same volume),
+    /// falling back to unlink-then-copy and removing the source file.
+    pub fn apply_recursive(src: &Path, dest: &Path, move_files: bool) -> Result<(), String> {
         if src.is_file() {
             if let Some(parent) = dest.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            // CRITICAL: Unlink dest before copying!
+            // CRITICAL: Unlink dest before copying/moving!
             // If dest is a hardlink (to a Version Vault snapshot), overwriting it in-place
             // writes directly into the shared inode, mutating and corrupting the snapshot in the vault!
             if dest.exists() {
                 let _ = fs::remove_file(dest);
             }
-            fs::copy(src, dest).map_err(|e| format!("Failed to copy {}: {e}", src.display()))?;
-            return Ok(());
+
+            if move_files {
+                match fs::rename(src, dest) {
+                    Ok(_) => return Ok(()),
+                    Err(_) => {
+                        fs::copy(src, dest).map_err(|e| format!("Failed to copy {}: {e}", src.display()))?;
+                        let _ = fs::remove_file(src);
+                        return Ok(());
+                    }
+                }
+            } else {
+                fs::copy(src, dest).map_err(|e| format!("Failed to copy {}: {e}", src.display()))?;
+                return Ok(());
+            }
         }
 
         if src.is_dir() {
@@ -401,7 +536,10 @@ impl DownloaderManager {
             for entry in entries.flatten() {
                 let child_src = entry.path();
                 let child_dest = dest.join(entry.file_name());
-                Self::copy_recursive(&child_src, &child_dest)?;
+                Self::apply_recursive(&child_src, &child_dest, move_files)?;
+            }
+            if move_files {
+                let _ = fs::remove_dir(src);
             }
         }
 
@@ -439,7 +577,55 @@ impl DownloaderManager {
         let state_clone = Arc::clone(&state);
         let app_clone = app_handle.clone();
 
-        // 3. Spawn background worker thread
+        // 3. Pre-flight free disk space check
+        let target_check_dir = options
+            .library_path
+            .as_deref()
+            .map(Path::new)
+            .unwrap_or_else(|| Path::new(&options.game_path));
+
+        if let Some(free_space) = get_available_disk_space(target_check_dir) {
+            // Check SizeOnDisk from appmanifest if available to estimate required headroom
+            let estimated_required = if let Some(lib_path) = &options.library_path {
+                let manifest_path = Path::new(lib_path)
+                    .join("steamapps")
+                    .join(format!("appmanifest_{}.acf", options.appid));
+                if let Ok(content) = fs::read_to_string(&manifest_path) {
+                    let vdf = crate::vdf::VdfParser::parse(&content);
+                    vdf.get("AppState")
+                        .and_then(|app_state| app_state.get_str("SizeOnDisk"))
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .unwrap_or(0)
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+
+            // If we have an estimated size, require at least 90% of it in free space before downloading.
+            // Minimum safety threshold of 500 MB if size is unknown.
+            let min_threshold = if estimated_required > 0 {
+                (estimated_required as f64 * 0.90) as u64
+            } else {
+                500 * 1024 * 1024
+            };
+
+            if free_space < min_threshold {
+                let mut st = state.lock().map_err(|e| e.to_string())?;
+                st.is_running = false;
+                let free_gb = free_space as f64 / (1024.0 * 1024.0 * 1024.0);
+                let req_gb = min_threshold as f64 / (1024.0 * 1024.0 * 1024.0);
+                return Err(format!(
+                    "Insufficient disk space on {}: only {:.2} GB available, but this download requires at least ~{:.2} GB. Please free up space before proceeding.",
+                    target_check_dir.display(),
+                    free_gb,
+                    req_gb
+                ));
+            }
+        }
+
+        // 4. Spawn background worker thread
         std::thread::spawn(move || {
             let appid = options.appid;
             let depot_id = options.depot_id.clone();
@@ -774,10 +960,14 @@ impl DownloaderManager {
                     if options.auto_apply {
                         emit_progress("applying", 90.0, "Applying downloaded files directly to game folder...", None);
                         let target_path = Path::new(&options.game_path);
-                        if let Err(e) = Self::copy_recursive(&staging_dir, target_path) {
+                        // Move files directly from staging to target game folder:
+                        // On the same drive, this executes instantaneous renames with 0 extra disk space!
+                        if let Err(e) = Self::apply_recursive(&staging_dir, target_path, true) {
                             emit_progress("error", 0.0, &format!("Failed to apply files to game: {e}"), None);
                             return;
                         }
+                        // Clean up temporary staging directory if any empty folders remain
+                        let _ = fs::remove_dir_all(&staging_dir);
                     }
 
                     // G. Auto-Lock Steam Manifest

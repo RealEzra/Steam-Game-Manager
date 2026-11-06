@@ -44,7 +44,7 @@ interface ChangelogModalProps {
 export function ChangelogModal({
   isOpen,
   onClose,
-  currentAppVersion = '0.9.5',
+  currentAppVersion = '0.9.6',
 }: ChangelogModalProps) {
   const { palette, colorHex } = useAppAccent();
   const [versions, setVersions] = useState<ChangelogVersion[]>([]);
